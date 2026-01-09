@@ -347,8 +347,28 @@ export class KSGORM {
       // Update existing value node
       const valueNode = await this.memory.getNode(existingEdge.toNode);
       if (valueNode) {
-        valueNode.props.literalValue = value;
-        valueNode.props.label = String(value);
+        // Normalize to JSON-friendly shape (matches KnowShowGo value node behavior)
+        const vt = valueNode.props?.valueType || typeof value;
+        let normalized = value;
+        if (vt === 'datetime') {
+          const d = value instanceof Date ? value : new Date(value);
+          normalized = Number.isNaN(d.getTime()) ? value : d.toISOString();
+        } else if (vt === 'url') {
+          try {
+            normalized = new URL(String(value)).toString();
+          } catch {
+            normalized = String(value);
+          }
+        } else if (vt === 'number') {
+          normalized = Number(value);
+        } else if (vt === 'boolean') {
+          normalized = Boolean(value);
+        } else if (vt === 'string') {
+          normalized = String(value);
+        }
+
+        valueNode.props.literalValue = normalized;
+        valueNode.props.label = normalized === null ? 'null' : String(normalized);
         await this.memory.upsert(valueNode, new Provenance({
           source: 'user',
           ts: new Date().toISOString(),

@@ -323,6 +323,76 @@ export class KnowShowGo {
     return [];
   }
 
+  _isUuid(v) {
+    return typeof v === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  }
+
+  _inferValueType(value) {
+    if (value instanceof Date) return 'datetime';
+    if (typeof value === 'number') return 'number';
+    if (typeof value === 'boolean') return 'boolean';
+    if (typeof value === 'string') return 'string';
+    if (value === null) return 'null';
+    return 'json';
+  }
+
+  _normalizeLiteral(value, valueType) {
+    switch (valueType) {
+      case 'number': {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error('Invalid number literal');
+        }
+        return value;
+      }
+      case 'boolean': {
+        if (typeof value !== 'boolean') throw new Error('Invalid boolean literal');
+        return value;
+      }
+      case 'datetime': {
+        if (value instanceof Date) return value.toISOString();
+        if (typeof value === 'string') {
+          const d = new Date(value);
+          if (Number.isNaN(d.getTime())) throw new Error('Invalid datetime literal');
+          return d.toISOString();
+        }
+        throw new Error('Invalid datetime literal');
+      }
+      case 'url': {
+        if (typeof value !== 'string') throw new Error('Invalid url literal');
+        try {
+          const u = new URL(value);
+          return u.toString();
+        } catch {
+          throw new Error('Invalid url literal');
+        }
+      }
+      case 'node_ref': {
+        if (!this._isUuid(value)) throw new Error('Invalid node_ref literal');
+        return value;
+      }
+      case 'string': {
+        if (typeof value !== 'string') throw new Error('Invalid string literal');
+        return value;
+      }
+      case 'null': {
+        return null;
+      }
+      case 'json': {
+        // JSON-serializable check (best-effort)
+        try {
+          JSON.stringify(value);
+        } catch {
+          throw new Error('Invalid json literal');
+        }
+        return value;
+      }
+      default: {
+        throw new Error(`Unsupported valueType: ${valueType}`);
+      }
+    }
+  }
+
   /**
    * Get a concept by UUID.
    * 
@@ -441,19 +511,21 @@ export class KnowShowGo {
       traceId: 'knowshowgo'
     });
 
-    const valueStr = String(value);
+    const normalizedType = valueType || this._inferValueType(value);
+    const normalizedValue = this._normalizeLiteral(value, normalizedType);
+    const valueStr = normalizedValue === null ? 'null' : String(normalizedValue);
     if (!embedding && this.embedFn) {
       embedding = await this.embedFn(valueStr);
     }
 
     const valueNode = new Node({
       kind: 'topic',
-      labels: [valueStr, `value:${valueType}`],
+      labels: [valueStr, `value:${normalizedType}`],
       props: {
         label: valueStr,
         isValue: true,
-        valueType: valueType,
-        literalValue: value,  // For quick access
+        valueType: normalizedType,
+        literalValue: normalizedValue, // JSON-friendly normalized value
         status: 'active',
         namespace: 'public'
       },
@@ -523,11 +595,12 @@ export class KnowShowGo {
 
       // Get or create property node
       const propNode = await this.getOrCreateProperty(propName, typeof propValue);
+      const valueType = propNode.props?.valueType || this._inferValueType(propValue);
 
       // Create value node
       const valueUuid = await this.createValueNode({
         value: propValue,
-        valueType: typeof propValue,
+        valueType: valueType,
         embedding: await this.embedFn(String(propValue)),
         provenance: prov
       });
