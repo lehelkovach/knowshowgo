@@ -9,6 +9,7 @@
  */
 
 import { Node, Edge, Provenance } from './models.js';
+import { KSGORM } from './orm/ksg-orm.js';
 
 export class KnowShowGo {
   /**
@@ -25,6 +26,7 @@ export class KnowShowGo {
     }
     this.embedFn = embedFn;
     this.memory = memory;
+    this.orm = new KSGORM(this);  // ORM for prototype-based object hydration
   }
 
   /**
