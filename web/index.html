@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KnowShowGo — Create Knode</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>Create a Knode</h1>
+        <p class="sub">
+          A <strong>Knode</strong> is a first-class node with document metadata + tags (text) and a computed embedding.
+        </p>
+      </header>
+
+      <section class="card">
+        <form id="knode-form">
+          <div class="field">
+            <label for="baseUrl">API base URL</label>
+            <input id="baseUrl" name="baseUrl" type="url" value="" placeholder="http://localhost:3000" />
+            <div class="help">Defaults to the same origin.</div>
+          </div>
+
+          <div class="grid">
+            <div class="field">
+              <label for="label">Label *</label>
+              <input id="label" name="label" required placeholder="e.g. Login to X.com" />
+            </div>
+            <div class="field">
+              <label for="prototypeUuid">Prototype UUID (optional)</label>
+              <input id="prototypeUuid" name="prototypeUuid" placeholder="uuid" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="summary">Summary</label>
+            <textarea id="summary" name="summary" rows="3" placeholder="Short description"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="tags">Tags (one per line)</label>
+            <textarea id="tags" name="tags" rows="5" placeholder="tag one&#10;tag two"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="metadata">Metadata (JSON, optional)</label>
+            <textarea id="metadata" name="metadata" rows="5" placeholder='{"source":"ui","kind":"procedure"}'></textarea>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Create Knode</button>
+            <button id="reset" type="button" class="secondary">Reset</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="result-header">
+          <h2>Result</h2>
+          <a class="link" href="/health" target="_blank" rel="noreferrer">Health</a>
+        </div>
+        <pre id="result" class="result">(submit the form)</pre>
+      </section>
+    </main>
+
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>
+

@@ -7,6 +7,8 @@
 
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { KnowShowGo } from '../knowshowgo.js';
 import { InMemoryMemory } from '../memory/in-memory.js';
 import { ArangoMemory } from '../memory/arango-memory.js';
@@ -55,6 +57,12 @@ export function createApp({ ksg }) {
   const app = express();
   app.use(cors());
   app.use(express.json());
+
+  // Static UI
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const webDir = path.resolve(__dirname, '../../web');
+  app.use('/ui', express.static(webDir));
 
 // Health check
   app.get('/health', (req, res) => {
@@ -242,6 +250,42 @@ app.post('/api/nodes', async (req, res) => {
     });
 
     res.json({ uuid: nodeUuid });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== Knode (Knowde/Knode) Endpoints =====
+/**
+ * POST /api/knodes
+ * Create a "Knode" (a node with document metadata and tags).
+ *
+ * Body:
+ * - label (string, required)
+ * - summary (string, optional)
+ * - tags (string[], optional)
+ * - metadata (object, optional)
+ * - associations (array, optional)
+ * - prototypeUuid (string, optional)
+ */
+app.post('/api/knodes', async (req, res) => {
+  try {
+    const { label, summary, tags, metadata, associations, prototypeUuid } = req.body;
+
+    if (!label) {
+      return res.status(400).json({ error: 'label is required' });
+    }
+
+    const uuid = await ksg.createNodeWithDocument({
+      label,
+      summary: summary || null,
+      tags: tags || [],
+      metadata: metadata || {},
+      associations: associations || [],
+      prototypeUuid: prototypeUuid || null
+    });
+
+    res.json({ uuid });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

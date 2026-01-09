@@ -40,6 +40,12 @@ KSG_MEMORY_BACKEND=arango npm start
 
 The API will be available at `http://localhost:3000`
 
+## Quick Start - Web UI (Create Knode)
+
+Start the server, then open:
+
+- `http://localhost:3000/ui/`
+
 ## Quick Start - Docker
 
 ```bash

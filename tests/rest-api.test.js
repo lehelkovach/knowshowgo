@@ -157,6 +157,27 @@ describe('REST API', () => {
     expect(embBody.success).toBe(true);
   });
 
+  test('knode create', async () => {
+    const res = await fetch(`${baseUrl}/api/knodes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        label: 'My Knode',
+        summary: 'hello',
+        tags: ['a', 'b'],
+        metadata: { source: 'test' }
+      })
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.uuid).toBeDefined();
+
+    const getRes = await fetch(`${baseUrl}/api/concepts/${body.uuid}`);
+    expect(getRes.status).toBe(200);
+    const node = await getRes.json();
+    expect(node.props.label).toBe('My Knode');
+  });
+
   test('orm register + create + get', async () => {
     const regRes = await fetch(`${baseUrl}/api/orm/register`, {
       method: 'POST',
