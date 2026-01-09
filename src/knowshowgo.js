@@ -728,64 +728,86 @@ export class KnowShowGo {
   }
 
   /**
-   * Compute node embedding as mean of all related text embeddings.
+   * Compute node embedding as mean of all associated tag node embeddings.
    * 
-   * Includes:
-   * - Tag node embeddings (text tags)
-   * - Node's own label/summary embeddings
-   * - Related node label embeddings (via associations)
+   * The concept's embedding is the mean vector embedding of all tag nodes
+   * that are linked via edges to the concept (or its document).
+   * 
+   * Tags all have vector embeddings, and the mean of all edge-linked tag
+   * node vector embedding attribute values represents the concept.
    * 
    * @param {string} nodeUuid - Node UUID
    * @returns {Promise<number[]|null>} Mean embedding vector
    */
   async computeNodeEmbedding(nodeUuid) {
-    const embeddings = [];
+    const tagEmbeddings = [];
 
-    // 1. Get node
-    const node = await this.getConcept(nodeUuid);
-    if (!node) {
-      return null;
+    // 1. Get all edges connected to this node
+    const edges = Array.from(this.memory.edges?.values() || []);
+    
+    // 2. Find all tag nodes linked via edges (both incoming and outgoing)
+    const connectedNodes = new Set();
+    
+    // Outgoing edges: node -> tag
+    for (const edge of edges) {
+      if (edge.fromNode === nodeUuid) {
+        connectedNodes.add(edge.toNode);
+      }
     }
-
-    // 2. Add node's own text embeddings
-    if (node.props?.label) {
-      const labelEmbedding = await this.embedFn(node.props.label);
-      embeddings.push(labelEmbedding);
+    
+    // Incoming edges: tag -> node
+    for (const edge of edges) {
+      if (edge.toNode === nodeUuid) {
+        connectedNodes.add(edge.fromNode);
+      }
     }
-    if (node.props?.summary) {
-      const summaryEmbedding = await this.embedFn(node.props.summary);
-      embeddings.push(summaryEmbedding);
-    }
-
-    // 3. Get document node and tag embeddings
+    
+    // 3. Also check document node if it exists
     const docNode = await this._getDocumentNode(nodeUuid);
-    if (docNode && docNode.props?.tags) {
-      for (const tagUuid of docNode.props.tags) {
-        const tagNode = await this.getConcept(tagUuid);
-        if (tagNode && tagNode.llmEmbedding) {
-          embeddings.push(tagNode.llmEmbedding);
+    if (docNode) {
+      // Get edges from document to tags
+      for (const edge of edges) {
+        if (edge.fromNode === docNode.uuid) {
+          connectedNodes.add(edge.toNode);
         }
       }
     }
 
-    // 4. Add related node embeddings (via associations)
-    const edges = Array.from(this.memory.edges?.values() || []);
-    const nodeAssociations = edges.filter(e => e.fromNode === nodeUuid);
-    
-    for (const assoc of nodeAssociations) {
-      const relatedNode = await this.getConcept(assoc.toNode);
-      if (relatedNode && relatedNode.props?.label) {
-        const relatedEmbedding = await this.embedFn(relatedNode.props.label);
-        embeddings.push(relatedEmbedding);
+    // 4. Collect embeddings from all connected tag nodes
+    for (const connectedUuid of connectedNodes) {
+      const connectedNode = await this.getConcept(connectedUuid);
+      if (connectedNode && connectedNode.props?.isTag === true) {
+        // This is a tag node - use its embedding
+        if (connectedNode.llmEmbedding) {
+          tagEmbeddings.push(connectedNode.llmEmbedding);
+        }
       }
     }
 
-    // 5. Compute mean
-    if (embeddings.length === 0) {
+    // 5. If no tag embeddings found, fall back to node's own text
+    if (tagEmbeddings.length === 0) {
+      const node = await this.getConcept(nodeUuid);
+      if (!node) {
+        return null;
+      }
+      
+      // Use node's label/summary as fallback
+      if (node.props?.label) {
+        const labelEmbedding = await this.embedFn(node.props.label);
+        tagEmbeddings.push(labelEmbedding);
+      }
+      if (node.props?.summary) {
+        const summaryEmbedding = await this.embedFn(node.props.summary);
+        tagEmbeddings.push(summaryEmbedding);
+      }
+    }
+
+    // 6. Compute mean of all tag embeddings
+    if (tagEmbeddings.length === 0) {
       return null;
     }
 
-    return this._meanEmbedding(embeddings);
+    return this._meanEmbedding(tagEmbeddings);
   }
 
   /**

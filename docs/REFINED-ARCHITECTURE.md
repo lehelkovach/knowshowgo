@@ -5,7 +5,9 @@
 **All representational units** (percepts, objects, concepts, topics, subjects, entities, symbols) are nodes with:
 1. **UUID** - Unique identifier
 2. **Document** - Metadata and associations to tag nodes (text)
-3. **Vector Embedding** - Mean of all related text vector embeddings
+3. **Vector Embedding** - Mean of all edge-linked tag node vector embeddings
+
+**Key Rule**: Tags all have vector embeddings, and the mean vector embedding of all associated (edge) linked tag node vector embedding attribute values represents the concept.
 
 ## Node Structure
 
@@ -87,63 +89,66 @@ TagNode {
 
 ## Embedding Computation
 
-### Mean Embedding from Related Text
+### Mean Embedding from Edge-Linked Tag Nodes
+
+**Core Principle**: Tags all have vector embeddings, and the mean vector embedding of all associated (edge) linked tag node vector embedding attribute values represents the concept.
 
 ```javascript
 async computeNodeEmbedding(nodeUuid) {
-  // 1. Get document node
-  const docNode = await this.getDocumentNode(nodeUuid);
+  const tagEmbeddings = [];
+
+  // 1. Get all edges connected to this node (incoming and outgoing)
+  const edges = getAllEdges(nodeUuid);
   
-  // 2. Get all tag nodes associated to document
-  const tagUuids = docNode.props.tags || [];
-  const tagNodes = await Promise.all(
-    tagUuids.map(uuid => this.getNode(uuid))
-  );
+  // 2. Find all tag nodes linked via edges
+  const connectedNodes = new Set();
   
-  // 3. Get embeddings from:
-  //    - Tag nodes (text embeddings)
-  //    - Node's own label/summary
-  //    - Related node labels (via associations)
-  const embeddings = [];
-  
-  // Add tag embeddings
-  for (const tagNode of tagNodes) {
-    if (tagNode.llmEmbedding) {
-      embeddings.push(tagNode.llmEmbedding);
+  // Outgoing edges: concept -> tag
+  for (const edge of edges) {
+    if (edge.fromNode === nodeUuid) {
+      connectedNodes.add(edge.toNode);
     }
   }
   
-  // Add node's own text embedding
-  const node = await this.getNode(nodeUuid);
-  if (node.props.label) {
-    const labelEmbedding = await this.embedFn(node.props.label);
-    embeddings.push(labelEmbedding);
-  }
-  if (node.props.summary) {
-    const summaryEmbedding = await this.embedFn(node.props.summary);
-    embeddings.push(summaryEmbedding);
-  }
-  
-  // Add related node embeddings (via associations)
-  const associations = await this.getAssociations(nodeUuid);
-  for (const assoc of associations) {
-    const relatedNode = await this.getNode(assoc.toNode);
-    if (relatedNode.props.label) {
-      const relatedEmbedding = await this.embedFn(relatedNode.props.label);
-      embeddings.push(relatedEmbedding);
+  // Incoming edges: tag -> concept
+  for (const edge of edges) {
+    if (edge.toNode === nodeUuid) {
+      connectedNodes.add(edge.fromNode);
     }
   }
   
-  // 4. Compute mean embedding
-  if (embeddings.length === 0) {
+  // 3. Also check document node if it exists
+  const docNode = await getDocumentNode(nodeUuid);
+  if (docNode) {
+    // Get edges from document to tags
+    for (const edge of edges) {
+      if (edge.fromNode === docNode.uuid) {
+        connectedNodes.add(edge.toNode);
+      }
+    }
+  }
+
+  // 4. Collect embeddings from all connected tag nodes
+  for (const connectedUuid of connectedNodes) {
+    const connectedNode = await getNode(connectedUuid);
+    if (connectedNode && connectedNode.props.isTag === true) {
+      // This is a tag node - use its embedding attribute value
+      if (connectedNode.llmEmbedding) {
+        tagEmbeddings.push(connectedNode.llmEmbedding);
+      }
+    }
+  }
+
+  // 5. Compute mean of all tag node embeddings
+  if (tagEmbeddings.length === 0) {
     return null;
   }
   
-  const meanEmbedding = this._meanEmbedding(embeddings);
+  const meanEmbedding = _meanEmbedding(tagEmbeddings);
   
-  // 5. Update node embedding
+  // 6. Update node embedding
   node.llmEmbedding = meanEmbedding;
-  await this.memory.upsert(node, prov);
+  await memory.upsert(node, prov);
   
   return meanEmbedding;
 }

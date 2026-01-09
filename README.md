@@ -28,6 +28,31 @@ KnowShowGo (KSG) is a prototype-based knowledge graph that combines:
 npm install
 ```
 
+## Quick Start - REST API
+
+```bash
+# Start API server (in-memory backend)
+npm start
+
+# Or with ArangoDB
+KSG_MEMORY_BACKEND=arango npm start
+```
+
+The API will be available at `http://localhost:3000`
+
+## Quick Start - Docker
+
+```bash
+# Start ArangoDB and API server
+docker-compose up -d
+
+# Check status
+docker-compose ps
+
+# View logs
+docker-compose logs -f knowshowgo-api
+```
+
 ## Quick Start
 
 ```javascript
@@ -94,8 +119,12 @@ Embedding Service (OpenAI/Local/etc.)
 
 ## Documentation
 
+- [Handoff Document](./HANDOFF.md) - **Start here** - Complete extraction and deployment guide
 - [API Reference](./docs/API.md) - Full API documentation
+- [REST API](./src/server/rest-api.js) - REST API server implementation
+- [Python Client](./api/python/client.py) - Python REST API client
 - [System Design](./docs/Knowshowgo_SYSTEM_DESIGN_v0.1.md) - Original system design
+- [Refined Architecture](./docs/REFINED-ARCHITECTURE.md) - Current architecture with documents and mean embeddings
 - [Architecture](./docs/knowshowgo-ontology-architecture.md) - Architecture details
 - [Versioning Strategy](./docs/knowshowgo-versioning-strategy.md) - Versioning approach
 - [Test Coverage](./docs/TEST-COVERAGE.md) - Test migration guide
