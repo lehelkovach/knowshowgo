@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { KnowShowGo } from '../knowshowgo.js';
 import { InMemoryMemory } from '../memory/in-memory.js';
 import { ArangoMemory } from '../memory/arango-memory.js';
+import { seedOslAgentPrototype } from '../seed/osl_agent.js';
 
 // Initialize KnowShowGo with embedding function
 // In production, this should use a real embedding service
@@ -67,6 +68,16 @@ export function createApp({ ksg }) {
 // Health check
   app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'knowshowgo-api' });
+  });
+
+  // Seed endpoints (idempotent)
+  app.post('/api/seed/osl-agent', async (_req, res) => {
+    try {
+      const report = await seedOslAgentPrototype(ksg);
+      res.json({ ok: true, report });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
 // ===== Prototype Endpoints =====
@@ -286,6 +297,146 @@ app.post('/api/knodes', async (req, res) => {
     });
 
     res.json({ uuid });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== Procedures (OSL-agent-prototype compatibility) =====
+function hasCycle(edges, from, to) {
+  // check if adding from->to creates a cycle by seeing if there's a path to 'from' from 'to'
+  const adj = new Map();
+  for (const e of edges) {
+    if (!adj.has(e.fromNode)) adj.set(e.fromNode, []);
+    adj.get(e.fromNode).push(e.toNode);
+  }
+  // include the new edge
+  if (!adj.has(from)) adj.set(from, []);
+  adj.get(from).push(to);
+
+  const stack = [to];
+  const seen = new Set();
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur === from) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    const next = adj.get(cur) || [];
+    for (const n of next) stack.push(n);
+  }
+  return false;
+}
+
+/**
+ * POST /api/procedures
+ * Create a Procedure + Step nodes with DAG dependencies.
+ *
+ * Body:
+ * - title (string)
+ * - description (string)
+ * - steps (array of { title, payload?, tool?, order?, guard_text?, guard?, on_fail? })
+ * - dependencies (array of [prereq_index, step_index]) // 0-based indices into steps
+ */
+app.post('/api/procedures', async (req, res) => {
+  try {
+    const { title, description, steps, dependencies, guards, extraProps } = req.body || {};
+    if (!title || !Array.isArray(steps)) {
+      return res.status(400).json({ error: 'title and steps are required' });
+    }
+    const deps = Array.isArray(dependencies) ? dependencies : [];
+    const g = guards || {};
+
+    // Create procedure as a topic node (store logical kind in props for compatibility)
+    const procUuid = await ksg.createNodeWithDocument({
+      label: title,
+      summary: description || '',
+      tags: [`procedure:${title}`],
+      metadata: { kind: 'Procedure', title, description, ...(extraProps || {}) }
+    });
+
+    // Create steps
+    const stepUuids = [];
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i] || {};
+      const stepTitle = s.title || `Step ${i + 1}`;
+      const stepUuid = await ksg.createNodeWithDocument({
+        label: stepTitle,
+        summary: '',
+        tags: [`step:${stepTitle}`],
+        metadata: {
+          kind: 'Step',
+          title: stepTitle,
+          payload: s.payload,
+          tool: s.tool,
+          order: s.order ?? i,
+          guard_text: s.guard_text ?? g[i],
+          guard: s.guard,
+          on_fail: s.on_fail,
+          procedure_uuid: procUuid
+        }
+      });
+      stepUuids.push(stepUuid);
+      await ksg.addAssociation({
+        fromConceptUuid: procUuid,
+        toConceptUuid: stepUuid,
+        relationType: 'has_step',
+        strength: 1.0,
+        props: { order: i }
+      });
+    }
+
+    // Dependency edges: step -> prereq (matches osl-agent-prototype ProcedureBuilder semantics)
+    const existing = (await ksg.getAssociations(procUuid, 'both'))
+      .filter(e => e.rel === 'depends_on' || e.rel === 'has_step');
+    const depEdges = [];
+    for (const [prereqIdx, stepIdx] of deps) {
+      if (typeof prereqIdx !== 'number' || typeof stepIdx !== 'number') {
+        return res.status(400).json({ error: 'dependencies must be [prereq_index, step_index] pairs' });
+      }
+      if (prereqIdx < 0 || prereqIdx >= stepUuids.length || stepIdx < 0 || stepIdx >= stepUuids.length) {
+        return res.status(400).json({ error: 'dependency index out of range' });
+      }
+      const prereq = stepUuids[prereqIdx];
+      const step = stepUuids[stepIdx];
+      depEdges.push({ fromNode: step, toNode: prereq });
+    }
+    // cycle check on step dependency graph
+    for (const e of depEdges) {
+      const graphEdges = [
+        ...existing.filter(x => x.rel === 'depends_on').map(x => ({ fromNode: x.fromNode, toNode: x.toNode })),
+        ...depEdges
+      ];
+      if (hasCycle(graphEdges, e.fromNode, e.toNode)) {
+        return res.status(400).json({ error: 'cycle_detected' });
+      }
+    }
+
+    for (const e of depEdges) {
+      await ksg.addAssociation({
+        fromConceptUuid: e.fromNode,
+        toConceptUuid: e.toNode,
+        relationType: 'depends_on',
+        strength: 1.0
+      });
+    }
+
+    res.json({ procedure_uuid: procUuid, step_uuids: stepUuids });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/procedures/search
+ * Body: { query, topK? }
+ */
+app.post('/api/procedures/search', async (req, res) => {
+  try {
+    const { query, topK } = req.body || {};
+    if (!query) return res.status(400).json({ error: 'query is required' });
+    const results = await ksg.searchConcepts({ query, topK: topK || 5 });
+    const filtered = results.filter(r => r?.props?.kind === 'Procedure' || r?.props?.isProcedure === true);
+    res.json({ results: filtered });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

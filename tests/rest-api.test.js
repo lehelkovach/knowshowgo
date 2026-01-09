@@ -205,5 +205,37 @@ describe('REST API', () => {
     expect(got.uuid).toBe(created.uuid);
     expect(got.email).toBe('john@example.com');
   });
+
+  test('osl-agent seed endpoint + procedure create/search', async () => {
+    const seedRes = await fetch(`${baseUrl}/api/seed/osl-agent`, { method: 'POST' });
+    expect(seedRes.status).toBe(200);
+    const seedBody = await seedRes.json();
+    expect(seedBody.ok).toBe(true);
+
+    const createRes = await fetch(`${baseUrl}/api/procedures`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title: 'LoginProcedure',
+        description: 'Log into a site',
+        steps: [{ title: 'Open site' }, { title: 'Enter credentials' }],
+        dependencies: [[0, 1]]
+      })
+    });
+    expect(createRes.status).toBe(200);
+    const created = await createRes.json();
+    expect(created.procedure_uuid).toBeDefined();
+    expect(Array.isArray(created.step_uuids)).toBe(true);
+    expect(created.step_uuids.length).toBe(2);
+
+    const searchRes = await fetch(`${baseUrl}/api/procedures/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'LoginProcedure', topK: 5 })
+    });
+    expect(searchRes.status).toBe(200);
+    const searchBody = await searchRes.json();
+    expect(Array.isArray(searchBody.results)).toBe(true);
+  });
 });
 

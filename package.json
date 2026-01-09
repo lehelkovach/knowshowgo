@@ -11,6 +11,7 @@
     "lint": "eslint src/**/*.js",
     "docs": "jsdoc -c jsdoc.json",
     "build": "echo 'No build step required for ES modules'",
+    "seed:osl-agent": "node scripts/seed-osl-agent.js",
     "start": "node src/server/rest-api.js",
     "dev": "node --watch src/server/rest-api.js"
   },
