@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  arangodb:
+    image: arangodb:latest
+    container_name: knowshowgo-arango
+    environment:
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD:-changeme}
+    ports:
+      - "8529:8529"
+    volumes:
+      - arango-data:/var/lib/arangodb3
+      - arango-apps:/var/lib/arangodb3-apps
+    healthcheck:
+      test: ["CMD", "arangosh", "--server.authentication", "false", "--javascript.execute", "db._version()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - knowshowgo-network
+
+  knowshowgo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: knowshowgo-api
+    environment:
+      PORT: 3000
+      KSG_MEMORY_BACKEND: arango
+      ARANGO_URL: http://arangodb:8529
+      ARANGO_DB: knowshowgo
+      ARANGO_USER: root
+      ARANGO_PASS: ${ARANGO_ROOT_PASSWORD:-changeme}
+    ports:
+      - "3000:3000"
+    depends_on:
+      arangodb:
+        condition: service_healthy
+    networks:
+      - knowshowgo-network
+
+volumes:
+  arango-data:
+  arango-apps:
+
+networks:
+  knowshowgo-network:
+    driver: bridge
+
