@@ -1,9 +1,31 @@
+# Dependencies
 node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
 dist/
+build/
 *.log
-.DS_Store
+
+# Environment files
 .env
 .env.local
+.env.*.local
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
 coverage/
 .nyc_output/
+.jest/
+
+# OS
+Thumbs.db
 
