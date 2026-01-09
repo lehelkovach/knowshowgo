@@ -299,6 +299,31 @@ export class KnowShowGo {
   }
 
   /**
+   * List all edges in the current memory backend.
+   *
+   * Works for Map-backed in-memory storage and Arango proxy storage.
+   *
+   * @private
+   * @returns {Promise<Array>}
+   */
+  async _listEdges() {
+    const edges = this.memory?.edges;
+    if (!edges) return [];
+
+    if (edges instanceof Map) {
+      return Array.from(edges.values());
+    }
+
+    // ArangoMemory exposes edges.values as an async function returning an array
+    if (typeof edges.values === 'function') {
+      const out = edges.values();
+      return Array.isArray(out) ? out : await out;
+    }
+
+    return [];
+  }
+
+  /**
    * Get a concept by UUID.
    * 
    * @param {string} conceptUuid - Concept UUID
@@ -306,6 +331,37 @@ export class KnowShowGo {
    */
   async getConcept(conceptUuid) {
     return await this.memory.getNode(conceptUuid);
+  }
+
+  /**
+   * Get a prototype by UUID.
+   *
+   * @param {string} prototypeUuid
+   * @returns {Promise<Object|null>}
+   */
+  async getPrototype(prototypeUuid) {
+    const node = await this.getConcept(prototypeUuid);
+    if (!node) return null;
+    if (node.props?.isPrototype !== true) return null;
+    return node;
+  }
+
+  /**
+   * Get associations (edges) for a concept.
+   *
+   * @param {string} conceptUuid
+   * @param {'incoming'|'outgoing'|'both'} [direction='both']
+   * @returns {Promise<Array>}
+   */
+  async getAssociations(conceptUuid, direction = 'both') {
+    const edges = await this._listEdges();
+    if (direction === 'incoming') {
+      return edges.filter(e => e.toNode === conceptUuid);
+    }
+    if (direction === 'outgoing') {
+      return edges.filter(e => e.fromNode === conceptUuid);
+    }
+    return edges.filter(e => e.fromNode === conceptUuid || e.toNode === conceptUuid);
   }
 
   /**
@@ -561,7 +617,7 @@ export class KnowShowGo {
     }
 
     // Find direct "has_value" associations with propertyName in props
-    const edges = Array.from(this.memory.edges?.values() || []);
+    const edges = await this._listEdges();
     const hasValueEdges = edges.filter(e => 
       e.fromNode === conceptUuid && 
       e.rel === 'has_value' &&
@@ -757,7 +813,7 @@ export class KnowShowGo {
     const tagEmbeddings = [];
 
     // 1. Get all edges connected to this node
-    const edges = Array.from(this.memory.edges?.values() || []);
+    const edges = await this._listEdges();
     
     // 2. Find all tag nodes linked via edges (both incoming and outgoing)
     const connectedNodes = new Set();
@@ -856,7 +912,7 @@ export class KnowShowGo {
    * @private
    */
   async _getDocumentNode(conceptUuid) {
-    const edges = Array.from(this.memory.edges?.values() || []);
+    const edges = await this._listEdges();
     const docEdge = edges.find(e =>
       e.fromNode === conceptUuid &&
       e.rel === 'has_document'

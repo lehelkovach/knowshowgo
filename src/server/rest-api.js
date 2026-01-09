@@ -44,20 +44,22 @@ const getMemory = () => {
   return new InMemoryMemory();
 };
 
-// Initialize KnowShowGo
-const ksg = new KnowShowGo({
-  embedFn: getEmbedFn(),
-  memory: getMemory()
-});
+export function createKnowShowGoFromEnv() {
+  return new KnowShowGo({
+    embedFn: getEmbedFn(),
+    memory: getMemory()
+  });
+}
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+export function createApp({ ksg }) {
+  const app = express();
+  app.use(cors());
+  app.use(express.json());
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'knowshowgo-api' });
-});
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok', service: 'knowshowgo-api' });
+  });
 
 // ===== Prototype Endpoints =====
 
@@ -272,7 +274,7 @@ app.post('/api/orm/register', async (req, res) => {
       return res.status(400).json({ error: 'prototypeName is required' });
     }
 
-    const Model = await ksg.orm.registerPrototype(prototypeName, options || {});
+    await ksg.orm.registerPrototype(prototypeName, options || {});
     res.json({ success: true, prototypeName });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -298,7 +300,7 @@ app.post('/api/orm/:prototypeName/create', async (req, res) => {
     }
 
     const instance = await Model.create(properties);
-    res.json({ uuid: instance.uuid, ...instance });
+    res.json(await instance.toJSON());
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -322,7 +324,7 @@ app.get('/api/orm/:prototypeName/:uuid', async (req, res) => {
       return res.status(404).json({ error: 'Instance not found' });
     }
 
-    res.json(instance);
+    res.json(await instance.toJSON());
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -334,6 +336,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+  return app;
+}
+
+// Default runtime instance
+const ksg = createKnowShowGoFromEnv();
+const app = createApp({ ksg });
+
 const PORT = process.env.PORT || 3000;
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -343,5 +352,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { app };
+export { app, ksg };
 

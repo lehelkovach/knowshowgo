@@ -18,6 +18,17 @@ export class KSGORM {
   }
 
   /**
+   * Get a previously registered ORM model class.
+   *
+   * @param {string} prototypeName
+   * @returns {Promise<Function|null>}
+   */
+  async getModel(prototypeName) {
+    const entry = this.registeredPrototypes.get(prototypeName);
+    return entry?.class ?? null;
+  }
+
+  /**
    * Register a prototype and create JavaScript class.
    * 
    * @param {string} prototypeName - Prototype name (e.g., 'Person')
@@ -75,6 +86,7 @@ export class KSGORM {
     class KSGObject {
       constructor(conceptUuid, hydrated = false) {
         this._conceptUuid = conceptUuid;
+        this.uuid = conceptUuid; // convenience for REST and callers
         this._ksg = self.ksg;
         this._orm = self;
         this._cache = {};  // Property cache
@@ -233,6 +245,15 @@ export class KSGORM {
       instance._cache = { ...data };
       instance._documentCache = { ...data };
       return instance;
+    };
+
+    /**
+     * Get an instance by UUID.
+     */
+    KSGObject.get = async function(uuid) {
+      const node = await self.ksg.getConcept(uuid);
+      if (!node) return null;
+      return new KSGObject(uuid, false);
     };
 
     /**

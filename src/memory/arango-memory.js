@@ -119,6 +119,68 @@ export class ArangoMemory {
     return edges.length > 0 ? edges[0] : null;
   }
 
+  /**
+   * Search for nodes by query and optional embedding.
+   *
+   * Matches the InMemoryMemory interface used by KnowShowGo.
+   */
+  async search({ query, topK, filters = {}, queryEmbedding = null }) {
+    await this.connect();
+
+    let results = await this.searchNodes(queryEmbedding, topK, filters);
+
+    if (filters.kind) {
+      results = results.filter(n => n.kind === filters.kind);
+    }
+
+    if (queryEmbedding && results.length > 0) {
+      results = results
+        .map(node => {
+          if (!node.llmEmbedding) return { node, similarity: 0 };
+          const similarity = this._cosineSimilarity(queryEmbedding, node.llmEmbedding);
+          return { node, similarity };
+        })
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, topK)
+        .map(r => ({
+          uuid: r.node.uuid,
+          name: r.node.props?.label || r.node.props?.name,
+          props: r.node.props,
+          similarity: r.similarity
+        }));
+    } else {
+      const q = (query || '').toLowerCase();
+      results = results
+        .filter(n => {
+          const label = (n.props?.label || n.props?.name || '').toLowerCase();
+          return label.includes(q);
+        })
+        .slice(0, topK)
+        .map(n => ({
+          uuid: n.uuid,
+          name: n.props?.label || n.props?.name,
+          props: n.props,
+          similarity: 0.5
+        }));
+    }
+
+    return results;
+  }
+
+  _cosineSimilarity(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
   async searchNodes(queryEmbedding, topK, filters = {}) {
     await this.connect();
     
