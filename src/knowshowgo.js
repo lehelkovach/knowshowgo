@@ -564,5 +564,296 @@ export class KnowShowGo {
 
     return properties;
   }
+
+  /**
+   * Create a node with document metadata and tag nodes.
+   * 
+   * All representational units (percepts, objects, concepts, topics, etc.) have:
+   * - UUID
+   * - Document containing metadata and associations to tag nodes (text)
+   * - Vector embedding (mean of all related text vector embeddings)
+   * 
+   * @param {Object} params
+   * @param {string} params.label - Node label
+   * @param {string} [params.summary] - Node summary/description
+   * @param {string[]} [params.tags] - Array of text strings (will become tag nodes)
+   * @param {Object} [params.metadata] - Additional metadata
+   * @param {Array} [params.associations] - Associations to other nodes
+   * @param {string} [params.prototypeUuid] - Prototype UUID (if creating concept)
+   * @param {Provenance} [params.provenance] - Provenance info
+   * @returns {Promise<string>} Node UUID
+   */
+  async createNodeWithDocument({
+    label,
+    summary = null,
+    tags = [],
+    metadata = {},
+    associations = [],
+    prototypeUuid = null,
+    provenance = null
+  }) {
+    const prov = provenance || new Provenance({
+      source: 'user',
+      ts: new Date().toISOString(),
+      confidence: 1.0,
+      traceId: 'knowshowgo'
+    });
+
+    // 1. Create tag nodes from text
+    const tagNodes = [];
+    for (const tagText of tags) {
+      const tagEmbedding = await this.embedFn(tagText);
+      const tagNode = new Node({
+        kind: 'topic',
+        labels: [tagText],
+        props: {
+          label: tagText,
+          isTag: true,
+          text: tagText,
+          status: 'active',
+          namespace: 'public'
+        },
+        llmEmbedding: tagEmbedding
+      });
+      await this.memory.upsert(tagNode, prov, { embeddingRequest: true });
+      tagNodes.push(tagNode);
+    }
+
+    // 2. Create main node (embedding will be computed)
+    const node = new Node({
+      kind: 'topic',
+      labels: [label],
+      props: {
+        label: label,
+        summary: summary || '',
+        isConcept: prototypeUuid !== null,
+        isPrototype: prototypeUuid === null && metadata.isPrototype === true,
+        status: 'active',
+        namespace: 'public',
+        ...metadata
+      },
+      llmEmbedding: null  // Will be computed as mean of related text
+    });
+    await this.memory.upsert(node, prov, { embeddingRequest: false });
+
+    // 3. Create instanceOf association if prototype provided
+    if (prototypeUuid) {
+      await this.addAssociation({
+        fromConceptUuid: node.uuid,
+        toConceptUuid: prototypeUuid,
+        relationType: 'instanceOf',
+        strength: 1.0,
+        provenance: prov
+      });
+    }
+
+    // 4. Create document node
+    const docNode = new Node({
+      kind: 'topic',
+      labels: [`doc:${node.uuid}`, 'document'],
+      props: {
+        isDocument: true,
+        targetNodeUuid: node.uuid,
+        metadata: {
+          created: new Date().toISOString(),
+          updated: new Date().toISOString(),
+          version: 1,
+          ...metadata
+        },
+        tags: tagNodes.map(t => t.uuid),
+        associations: associations.map(a => ({
+          relationType: a.relationType || a.rel,
+          targetUuid: a.targetUuid || a.toNode,
+          weight: a.weight || a.w || 1.0
+        })),
+        status: 'active',
+        namespace: 'public'
+      },
+      llmEmbedding: null  // Will be computed from tags
+    });
+    await this.memory.upsert(docNode, prov, { embeddingRequest: false });
+
+    // 5. Link node to document
+    await this.addAssociation({
+      fromConceptUuid: node.uuid,
+      toConceptUuid: docNode.uuid,
+      relationType: 'has_document',
+      strength: 1.0,
+      provenance: prov
+    });
+
+    // 6. Link document to tags
+    for (const tagNode of tagNodes) {
+      await this.addAssociation({
+        fromConceptUuid: docNode.uuid,
+        toConceptUuid: tagNode.uuid,
+        relationType: 'has_tag',
+        strength: 1.0,
+        provenance: prov
+      });
+    }
+
+    // 7. Create associations specified in params
+    for (const assoc of associations) {
+      await this.addAssociation({
+        fromConceptUuid: node.uuid,
+        toConceptUuid: assoc.targetUuid || assoc.toNode,
+        relationType: assoc.relationType || assoc.rel,
+        strength: assoc.weight || assoc.w || 1.0,
+        provenance: prov
+      });
+    }
+
+    // 8. Compute mean embedding for node (from all related text)
+    const meanEmbedding = await this.computeNodeEmbedding(node.uuid);
+    if (meanEmbedding) {
+      node.llmEmbedding = meanEmbedding;
+      await this.memory.upsert(node, prov, { embeddingRequest: false });
+    }
+
+    // 9. Compute mean embedding for document (from tags)
+    if (tagNodes.length > 0) {
+      const tagEmbeddings = tagNodes
+        .map(t => t.llmEmbedding)
+        .filter(e => e !== null && e !== undefined);
+      
+      if (tagEmbeddings.length > 0) {
+        const docMeanEmbedding = this._meanEmbedding(tagEmbeddings);
+        docNode.llmEmbedding = docMeanEmbedding;
+        await this.memory.upsert(docNode, prov, { embeddingRequest: false });
+      }
+    }
+
+    return node.uuid;
+  }
+
+  /**
+   * Compute node embedding as mean of all related text embeddings.
+   * 
+   * Includes:
+   * - Tag node embeddings (text tags)
+   * - Node's own label/summary embeddings
+   * - Related node label embeddings (via associations)
+   * 
+   * @param {string} nodeUuid - Node UUID
+   * @returns {Promise<number[]|null>} Mean embedding vector
+   */
+  async computeNodeEmbedding(nodeUuid) {
+    const embeddings = [];
+
+    // 1. Get node
+    const node = await this.getConcept(nodeUuid);
+    if (!node) {
+      return null;
+    }
+
+    // 2. Add node's own text embeddings
+    if (node.props?.label) {
+      const labelEmbedding = await this.embedFn(node.props.label);
+      embeddings.push(labelEmbedding);
+    }
+    if (node.props?.summary) {
+      const summaryEmbedding = await this.embedFn(node.props.summary);
+      embeddings.push(summaryEmbedding);
+    }
+
+    // 3. Get document node and tag embeddings
+    const docNode = await this._getDocumentNode(nodeUuid);
+    if (docNode && docNode.props?.tags) {
+      for (const tagUuid of docNode.props.tags) {
+        const tagNode = await this.getConcept(tagUuid);
+        if (tagNode && tagNode.llmEmbedding) {
+          embeddings.push(tagNode.llmEmbedding);
+        }
+      }
+    }
+
+    // 4. Add related node embeddings (via associations)
+    const edges = Array.from(this.memory.edges?.values() || []);
+    const nodeAssociations = edges.filter(e => e.fromNode === nodeUuid);
+    
+    for (const assoc of nodeAssociations) {
+      const relatedNode = await this.getConcept(assoc.toNode);
+      if (relatedNode && relatedNode.props?.label) {
+        const relatedEmbedding = await this.embedFn(relatedNode.props.label);
+        embeddings.push(relatedEmbedding);
+      }
+    }
+
+    // 5. Compute mean
+    if (embeddings.length === 0) {
+      return null;
+    }
+
+    return this._meanEmbedding(embeddings);
+  }
+
+  /**
+   * Compute mean of embeddings.
+   * 
+   * @private
+   */
+  _meanEmbedding(embeddings) {
+    if (embeddings.length === 0) return null;
+    if (embeddings.length === 1) return embeddings[0];
+
+    const dim = embeddings[0].length;
+    const mean = new Array(dim).fill(0);
+
+    for (const emb of embeddings) {
+      if (!emb || emb.length !== dim) continue;
+      for (let i = 0; i < dim; i++) {
+        mean[i] += emb[i];
+      }
+    }
+
+    for (let i = 0; i < dim; i++) {
+      mean[i] /= embeddings.length;
+    }
+
+    return mean;
+  }
+
+  /**
+   * Get document node for a concept.
+   * 
+   * @private
+   */
+  async _getDocumentNode(conceptUuid) {
+    const edges = Array.from(this.memory.edges?.values() || []);
+    const docEdge = edges.find(e =>
+      e.fromNode === conceptUuid &&
+      e.rel === 'has_document'
+    );
+
+    if (docEdge) {
+      return await this.getConcept(docEdge.toNode);
+    }
+
+    return null;
+  }
+
+  /**
+   * Update node embedding when tags or associations change.
+   * 
+   * @param {string} nodeUuid - Node UUID
+   */
+  async updateNodeEmbedding(nodeUuid) {
+    const newEmbedding = await this.computeNodeEmbedding(nodeUuid);
+    
+    if (newEmbedding) {
+      const node = await this.getConcept(nodeUuid);
+      if (node) {
+        node.llmEmbedding = newEmbedding;
+        const prov = new Provenance({
+          source: 'system',
+          ts: new Date().toISOString(),
+          confidence: 1.0,
+          traceId: 'knowshowgo'
+        });
+        await this.memory.upsert(node, prov, { embeddingRequest: false });
+      }
+    }
+  }
 }
 
