@@ -106,3 +106,28 @@ ArangoDB data persists in Docker volumes:
 - For a public deployment, it’s recommended to add a reverse proxy (Caddy/Nginx) for **TLS** and keep ArangoDB unexposed.
 - The default API uses a **mock embedder** in `src/server/rest-api.js`. For production, wire it to a real embedding provider (or a local embedder service) and keep the embedding dimension consistent with your index strategy.
 
+## CI/CD: auto-deploy on push to `main`
+
+This repo includes a GitHub Actions workflow at `.github/workflows/deploy-oci.yml` that SSHes into your VM and runs:
+- `git reset --hard origin/main`
+- `docker compose up -d --build`
+
+### One-time VM prep
+
+On the VM, ensure:
+- the repo is cloned at `/opt/knowshowgo/repo` (or your chosen path)
+- `docker` and `docker compose` are installed
+- your `.env` exists (Arango password, optional OpenAI key, etc.)
+
+### GitHub repo secrets to add
+
+In GitHub → Repo → Settings → Secrets and variables → Actions → New repository secret:
+
+- `OCI_SSH_HOST`: VM public IP or hostname
+- `OCI_SSH_USER`: usually `ubuntu`
+- `OCI_SSH_PRIVATE_KEY`: a private key that can SSH into the VM (PEM/OpenSSH format)
+- `OCI_SSH_PORT`: optional (default 22)
+- `OCI_APP_DIR`: optional (default `/opt/knowshowgo/repo`)
+
+Security note: use a dedicated deploy SSH key (and ideally a dedicated deploy user) rather than your personal key.
+
