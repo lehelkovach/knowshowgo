@@ -17,8 +17,40 @@ import { seedOslAgentPrototype } from '../seed/osl_agent.js';
 // Initialize KnowShowGo with embedding function
 // In production, this should use a real embedding service
 const getEmbedFn = () => {
-  // Default: simple mock embedding
-  // Replace with your embedding service (OpenAI, local, etc.)
+  const apiKey = process.env.OPENAI_API_KEY;
+  const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+  const model = process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
+
+  // If OPENAI_API_KEY is set, use OpenAI embeddings; otherwise fall back to a mock embedder.
+  if (apiKey) {
+    return async (text) => {
+      const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          input: text
+        })
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`OpenAI embeddings failed (${res.status}): ${body.slice(0, 400)}`);
+      }
+
+      const json = await res.json();
+      const embedding = json?.data?.[0]?.embedding;
+      if (!Array.isArray(embedding)) {
+        throw new Error('OpenAI embeddings response missing embedding array');
+      }
+      return embedding;
+    };
+  }
+
+  // Default: simple mock embedding (stable, fast, deterministic)
   return async (text) => {
     const vec = new Array(384).fill(0);
     for (let i = 0; i < Math.min(text.length, 384); i++) {

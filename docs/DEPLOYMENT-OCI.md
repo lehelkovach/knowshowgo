@@ -74,6 +74,17 @@ API health:
 curl -sS http://localhost:3000/health | jq .
 ```
 
+## OpenAI embeddings (recommended for real semantic search)
+
+The service will use OpenAI embeddings automatically if `OPENAI_API_KEY` is set.
+
+Example (VM shell or `.env` used by Docker Compose):
+
+```bash
+OPENAI_API_KEY=your_key_here
+OPENAI_EMBED_MODEL=text-embedding-3-small
+```
+
 Seed the minimal ontology expected by `osl-agent-prototype` (idempotent):
 
 ```bash
