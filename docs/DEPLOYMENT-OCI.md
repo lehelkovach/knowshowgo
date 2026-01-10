@@ -41,6 +41,18 @@ git clone https://github.com/lehelkovach/knowshowgo.git
 cd knowshowgo
 ```
 
+## One-command provisioning (OCI CLI)
+
+If you have the OCI CLI configured locally, you can provision a VM + deploy KnowShowGo using:
+
+```bash
+export OCI_COMPARTMENT_OCID='ocid1.compartment.oc1...'
+export OCI_SSH_PUBLIC_KEY_FILE="$HOME/.ssh/id_ed25519.pub"
+./scripts/oci-provision-knowshowgo.sh
+```
+
+The script prints the VM public IP, the `/health` URL, and the UI URL.
+
 Set an Arango root password (choose your own):
 
 ```bash
