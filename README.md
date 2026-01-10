@@ -140,6 +140,8 @@ Embedding Service (OpenAI/Local/etc.)
 ## Documentation
 
 - [Handoff Document](./HANDOFF.md) - **Start here** - Complete extraction and deployment guide
+- [Oracle Cloud Deployment](./docs/DEPLOYMENT-OCI.md)
+- [OSL Agent Prototype Integration](./docs/OSL-AGENT-PROTOTYPE-INTEGRATION.md)
 - [API Reference](./docs/API.md) - Full API documentation
 - [REST API](./src/server/rest-api.js) - REST API server implementation
 - [Python Client](./api/python/client.py) - Python REST API client
