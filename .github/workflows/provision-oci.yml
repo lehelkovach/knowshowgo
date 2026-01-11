@@ -1,0 +1,104 @@
+name: Provision OCI VM (KnowShowGo)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (OCI CLI + jq)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3-pip jq
+          python3 -m pip install --upgrade pip
+          python3 -m pip install oci-cli
+
+      - name: Configure OCI CLI
+        shell: bash
+        env:
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${OCI_TENANCY_OCID:?Missing secret OCI_TENANCY_OCID}"
+          : "${OCI_USER_OCID:?Missing secret OCI_USER_OCID}"
+          : "${OCI_FINGERPRINT:?Missing secret OCI_FINGERPRINT}"
+          : "${OCI_REGION:?Missing secret OCI_REGION}"
+          : "${OCI_PRIVATE_KEY:?Missing secret OCI_PRIVATE_KEY}"
+
+          mkdir -p ~/.oci
+          chmod 700 ~/.oci
+          printf "%s" "$OCI_PRIVATE_KEY" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+
+          cat > ~/.oci/config <<EOF
+[DEFAULT]
+user=${OCI_USER_OCID}
+fingerprint=${OCI_FINGERPRINT}
+key_file=${HOME}/.oci/oci_api_key.pem
+tenancy=${OCI_TENANCY_OCID}
+region=${OCI_REGION}
+EOF
+          chmod 600 ~/.oci/config
+
+      - name: Write deploy SSH public key
+        shell: bash
+        env:
+          OCI_DEPLOY_SSH_PUBLIC_KEY: ${{ secrets.OCI_DEPLOY_SSH_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          : "${OCI_DEPLOY_SSH_PUBLIC_KEY:?Missing secret OCI_DEPLOY_SSH_PUBLIC_KEY}"
+          mkdir -p .tmp
+          printf "%s" "$OCI_DEPLOY_SSH_PUBLIC_KEY" > .tmp/deploy.pub
+
+      - name: Provision VM + deploy KnowShowGo (A1.Flex recommended)
+        shell: bash
+        env:
+          OCI_COMPARTMENT_OCID: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          OCI_SSH_PUBLIC_KEY_FILE: .tmp/deploy.pub
+          # Prefer Ampere free tier
+          OCI_SHAPE: VM.Standard.A1.Flex
+          OCI_INSTANCE_OCPUS: 4
+          OCI_INSTANCE_MEMORY_GBS: 24
+          # Secrets passed through to deployment
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_EMBED_MODEL: ${{ secrets.OPENAI_EMBED_MODEL }}
+        run: |
+          set -euo pipefail
+          : "${OCI_COMPARTMENT_OCID:?Missing secret OCI_COMPARTMENT_OCID}"
+
+          # Generate a password for this run (masked in logs)
+          ARANGO_ROOT_PASSWORD="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
+          echo "::add-mask::${ARANGO_ROOT_PASSWORD}"
+          export ARANGO_ROOT_PASSWORD
+
+          # If OpenAI key is present, mask it too
+          if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+            echo "::add-mask::${OPENAI_API_KEY}"
+          fi
+
+          ./scripts/oci-provision-knowshowgo.sh
+
+      - name: Next step (set deploy secrets)
+        shell: bash
+        run: |
+          cat <<'EOF'
+Provisioning complete.
+
+Next:
+- Copy the printed VM Public IP into GitHub secret `OCI_SSH_HOST`
+- Set `OCI_SSH_USER` (usually `ubuntu`)
+- Set `OCI_SSH_PRIVATE_KEY` to match the public key you used in `OCI_DEPLOY_SSH_PUBLIC_KEY`
+
+Then pushes to `main` will auto-deploy via `.github/workflows/deploy-oci.yml`.
+EOF
+

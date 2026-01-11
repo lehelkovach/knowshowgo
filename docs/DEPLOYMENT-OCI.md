@@ -112,6 +112,29 @@ This repo includes a GitHub Actions workflow at `.github/workflows/deploy-oci.ym
 - `git reset --hard origin/main`
 - `docker compose up -d --build`
 
+## Provision from GitHub Actions (no local OCI CLI required)
+
+If you want GitHub Actions to create the VM for you, use `.github/workflows/provision-oci.yml` (manual dispatch).
+
+### Required GitHub secrets for provisioning
+
+OCI API auth:
+- `OCI_TENANCY_OCID`
+- `OCI_USER_OCID`
+- `OCI_FINGERPRINT`
+- `OCI_REGION`
+- `OCI_PRIVATE_KEY` (API signing key PEM contents)
+- `OCI_COMPARTMENT_OCID`
+
+Instance SSH key (public):
+- `OCI_DEPLOY_SSH_PUBLIC_KEY` (e.g. contents of `~/.ssh/id_ed25519.pub`)
+
+Optional (recommended):
+- `OPENAI_API_KEY`
+- `OPENAI_EMBED_MODEL`
+
+After provisioning, copy the printed VM IP into `OCI_SSH_HOST` and add `OCI_SSH_PRIVATE_KEY` for the deploy workflow.
+
 ### One-time VM prep
 
 On the VM, ensure:
