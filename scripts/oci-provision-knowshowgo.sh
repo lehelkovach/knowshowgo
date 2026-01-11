@@ -21,6 +21,7 @@ set -euo pipefail
 # - OCI_INSTANCE_OCPUS / OCI_INSTANCE_MEMORY_GBS: for Flex shapes (optional)
 # - KSG_PORT: default 3000
 # - ARANGO_ROOT_PASSWORD: default random
+# - OPENAI_API_KEY / OPENAI_EMBED_MODEL: enable OpenAI embeddings in deployed service
 #
 # Security:
 # - Opens inbound TCP 22 and 3000 to the world.
@@ -118,7 +119,7 @@ fi
 
 ssh_pub="$(cat "$OCI_SSH_PUBLIC_KEY_FILE")"
 
-cloud_init="$(cat <<'CLOUDINIT'
+cloud_init="$(cat <<CLOUDINIT
 #cloud-config
 package_update: true
 packages:
@@ -127,17 +128,21 @@ packages:
   - git
 
 runcmd:
+  # Install Docker (includes docker compose plugin on Ubuntu)
+  - [ sh, -lc, "curl -fsSL https://get.docker.com | sh" ]
+  - [ sh, -lc, "systemctl enable --now docker" ]
+
+  # Deploy KnowShowGo
   - [ sh, -lc, "mkdir -p /opt/knowshowgo" ]
-  - [ sh, -lc, "cd /opt/knowshowgo && git clone https://github.com/lehelkovach/knowshowgo.git repo" ]
-  - [ sh, -lc, "cd /opt/knowshowgo/repo && echo \"ARANGO_ROOT_PASSWORD=${ARANGO_ROOT_PASSWORD}\" > .env" ]
+  - [ sh, -lc, "cd /opt/knowshowgo && (test -d repo && cd repo && git fetch --all --prune && git reset --hard origin/main || git clone https://github.com/lehelkovach/knowshowgo.git repo)" ]
+  - [ sh, -lc, "cd /opt/knowshowgo/repo && cat > .env <<'EOF'\nARANGO_ROOT_PASSWORD=${ARANGO_ROOT_PASSWORD}\nOPENAI_API_KEY=${OPENAI_API_KEY:-}\nOPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL:-text-embedding-3-small}\nEOF\nchmod 600 .env" ]
   - [ sh, -lc, "cd /opt/knowshowgo/repo && docker compose up -d --build" ]
-  - [ sh, -lc, "sleep 8" ]
+
+  # Seed minimal ontology for osl-agent-prototype (idempotent)
+  - [ sh, -lc, "sleep 12" ]
   - [ sh, -lc, "curl -sS -X POST http://localhost:${KSG_PORT}/api/seed/osl-agent >/opt/knowshowgo/seed.json || true" ]
 CLOUDINIT
 )"
-
-# Install docker via official convenience script (acceptable for MVP; can be hardened later)
-cloud_init="$cloud_init"$'\n'"runcmd:"$'\n'"  - [ sh, -lc, \"curl -fsSL https://get.docker.com | sh\" ]"$'\n'"  - [ sh, -lc, \"usermod -aG docker ubuntu || true\" ]"$'\n'"  - [ sh, -lc, \"systemctl enable docker && systemctl start docker\" ]"$'\n'"  - [ sh, -lc, \"curl -fsSL https://raw.githubusercontent.com/docker/compose/v2.29.7/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose || true\" ]"$'\n'"  - [ sh, -lc, \"chmod +x /usr/local/bin/docker-compose || true\" ]"$'\n'
 
 # OCI expects base64 user_data
 user_data_b64="$(printf "%s" "$cloud_init" | base64 -w 0)"
