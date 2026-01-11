@@ -22,6 +22,8 @@ set -euo pipefail
 # - KSG_PORT: default 3000
 # - ARANGO_ROOT_PASSWORD: default random
 # - OPENAI_API_KEY / OPENAI_EMBED_MODEL: enable OpenAI embeddings in deployed service
+# - ENV_OUT_FILE: write a local .env copy (default: ./knowshowgo.env)
+# - PRINT_ENV: if "1", prints the generated env file to console (includes secrets!)
 #
 # Security:
 # - Opens inbound TCP 22 and 3000 to the world.
@@ -51,10 +53,23 @@ OCI_SUBNET_CIDR="${OCI_SUBNET_CIDR:-10.0.0.0/24}"
 OCI_SHAPE="${OCI_SHAPE:-VM.Standard.E2.1.Micro}"
 OCI_UBUNTU_VERSION="${OCI_UBUNTU_VERSION:-22.04}"
 KSG_PORT="${KSG_PORT:-3000}"
+ENV_OUT_FILE="${ENV_OUT_FILE:-./knowshowgo.env}"
+PRINT_ENV="${PRINT_ENV:-0}"
 
 if [[ -z "${ARANGO_ROOT_PASSWORD:-}" ]]; then
   # Simple random; you can override with ARANGO_ROOT_PASSWORD env var.
   ARANGO_ROOT_PASSWORD="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
+fi
+
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "Optional: set OPENAI_API_KEY to enable real embeddings."
+  read -r -s -p "Enter OPENAI_API_KEY (leave blank to skip): " OPENAI_API_KEY || true
+  echo
+fi
+OPENAI_EMBED_MODEL="${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
+if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  read -r -p "OpenAI embed model [${OPENAI_EMBED_MODEL}]: " _m || true
+  if [[ -n "${_m:-}" ]]; then OPENAI_EMBED_MODEL="$_m"; fi
 fi
 
 ts="$(date +%Y%m%d-%H%M%S)"
@@ -119,6 +134,29 @@ fi
 
 ssh_pub="$(cat "$OCI_SSH_PUBLIC_KEY_FILE")"
 
+env_content="$(cat <<EOF
+# Generated $(date -Is)
+ARANGO_ROOT_PASSWORD=${ARANGO_ROOT_PASSWORD}
+OPENAI_API_KEY=${OPENAI_API_KEY:-}
+OPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL}
+EOF
+)"
+
+echo "$env_content" > "$ENV_OUT_FILE"
+chmod 600 "$ENV_OUT_FILE" || true
+echo "Wrote local env file: $ENV_OUT_FILE"
+if [[ "$PRINT_ENV" == "1" ]]; then
+  echo
+  echo "===== ${ENV_OUT_FILE} (contains secrets) ====="
+  echo "$env_content"
+  echo "============================================="
+  echo
+else
+  echo "Not printing env to console (set PRINT_ENV=1 to print)."
+fi
+
+ENV_B64="$(printf "%s" "$env_content" | base64 -w 0)"
+
 cloud_init="$(cat <<CLOUDINIT
 #cloud-config
 package_update: true
@@ -135,7 +173,7 @@ runcmd:
   # Deploy KnowShowGo
   - [ sh, -lc, "mkdir -p /opt/knowshowgo" ]
   - [ sh, -lc, "cd /opt/knowshowgo && (test -d repo && cd repo && git fetch --all --prune && git reset --hard origin/main || git clone https://github.com/lehelkovach/knowshowgo.git repo)" ]
-  - [ sh, -lc, "cd /opt/knowshowgo/repo && cat > .env <<'EOF'\nARANGO_ROOT_PASSWORD=${ARANGO_ROOT_PASSWORD}\nOPENAI_API_KEY=${OPENAI_API_KEY:-}\nOPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL:-text-embedding-3-small}\nEOF\nchmod 600 .env" ]
+  - [ sh, -lc, "cd /opt/knowshowgo/repo && printf '%s' '${ENV_B64}' | base64 -d > .env && chmod 600 .env" ]
   - [ sh, -lc, "cd /opt/knowshowgo/repo && docker compose up -d --build" ]
 
   # Seed minimal ontology for osl-agent-prototype (idempotent)
