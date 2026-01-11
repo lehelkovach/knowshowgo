@@ -53,6 +53,21 @@ export OCI_SSH_PUBLIC_KEY_FILE="$HOME/.ssh/id_ed25519.pub"
 
 The script prints the VM public IP, the `/health` URL, and the UI URL.
 
+## One-command provisioning + configure GitHub auto-deploy (OCI CLI + gh)
+
+If you want pushes to `main` to automatically update the OCI VM, use:
+
+```bash
+./scripts/local-oci-provision-and-configure-gh-deploy.sh \
+  --repo owner/repo \
+  --compartment ocid1.compartment.oc1... \
+  --ssh-user ubuntu \
+  --ssh-public-key ~/.ssh/id_ed25519.pub \
+  --ssh-private-key ~/.ssh/id_ed25519
+```
+
+This provisions the VM and then sets the GitHub Actions deploy secrets via `gh secret set`.
+
 Set an Arango root password (choose your own):
 
 ```bash

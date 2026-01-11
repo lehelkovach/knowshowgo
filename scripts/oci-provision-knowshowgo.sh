@@ -61,13 +61,13 @@ if [[ -z "${ARANGO_ROOT_PASSWORD:-}" ]]; then
   ARANGO_ROOT_PASSWORD="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
 fi
 
-if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+if [[ -z "${OPENAI_API_KEY:-}" && -t 0 ]]; then
   echo "Optional: set OPENAI_API_KEY to enable real embeddings."
   read -r -s -p "Enter OPENAI_API_KEY (leave blank to skip): " OPENAI_API_KEY || true
   echo
 fi
 OPENAI_EMBED_MODEL="${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
-if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+if [[ -n "${OPENAI_API_KEY:-}" && -t 0 ]]; then
   read -r -p "OpenAI embed model [${OPENAI_EMBED_MODEL}]: " _m || true
   if [[ -n "${_m:-}" ]]; then OPENAI_EMBED_MODEL="$_m"; fi
 fi
