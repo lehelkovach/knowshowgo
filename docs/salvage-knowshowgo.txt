@@ -1,0 +1,576 @@
+################################################################################
+#                                                                              #
+#         MERGED SALVAGE PLAN: Preserve/Factor knowshowgo Package              #
+#                                                                              #
+################################################################################
+#                                                                              #
+#  Synthesized from analyses by:                                               #
+#    - Claude Opus 4 (Anthropic)                                               #
+#    - GPT-5.2 (OpenAI)                                                        #
+#    - Gemini 3 Pro Preview (Google)                                           #
+#                                                                              #
+#  Date: 2026-01-14                                                            #
+#  Target: github.com/lehelkovach/osl-agent (this repo, as knowshowgo pkg)     #
+#  Also: Echo superior patterns back into osl-agent-prototype KSG modules      #
+#                                                                              #
+################################################################################
+
+================================================================================
+PURPOSE OF THIS DOCUMENT
+================================================================================
+
+While osl-agent-prototype is the "main" repository going forward, this 
+deprecated repository contains design patterns and abstractions that are
+SUPERIOR to what currently exists in the prototype. 
+
+This document describes:
+1. What should be PRESERVED from this repo as a standalone package
+2. How to FACTOR knowshowgo into a reusable library
+3. How to ECHO these improvements back into osl-agent-prototype
+
+The goal is to extract the "memory kernel" / "cognitive primitives" from
+this repo into a clean, dependency-light package that can be:
+  - Used standalone for experiments
+  - Imported into osl-agent-prototype
+  - Published as a separate PyPI package
+
+================================================================================
+CONSENSUS: WHY THIS REPO'S DESIGN IS SUPERIOR (FOR MEMORY PRIMITIVES)
+================================================================================
+
+All three foundation models agreed on these architectural advantages:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DEPRECATED REPO (knowshowgo)        vs    OSL-AGENT-PROTOTYPE              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✓ Single-responsibility modules     │  ✗ Monolithic agent.py (2000+ lines)│
+│  ✓ Immutable Prototype schemas       │  ✗ Mutable Node for everything      │
+│  ✓ Working memory w/ reinforcement   │  ✗ No activation/reinforcement      │
+│  ✓ Async replication (queue-based)   │  ✗ Synchronous DB operations        │
+│  ✓ Deterministic fallback parsing    │  ✗ LLM-only classification          │
+│  ✓ Clean package structure           │  ✗ Everything in src/personal_asst  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✗ No agent loop                     │  ✓ Complete agent implementation    │
+│  ✗ No learning engine                │  ✓ Failure analysis, feedback       │
+│  ✗ Limited prototype seeding         │  ✓ 60+ PropertyDefs, rich ontology  │
+│  ✗ No tools integration              │  ✓ Web, shell, calendar, contacts   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CONCLUSION (Gemini): "osl-agent-prototype is the superior product, but the 
+deprecated repository contains the superior ENGINE DESIGN for the memory 
+subsystem."
+
+
+================================================================================
+PART 1: PACKAGE STRUCTURE FOR knowshowgo
+================================================================================
+
+Transform this repo into a clean, publishable package structure:
+
+```
+knowshowgo/
+├── pyproject.toml              # Package metadata (poetry or setuptools)
+├── README.md                   # Package documentation
+├── LICENSE                     # MIT or Apache 2.0
+│
+├── src/
+│   └── knowshowgo/
+│       ├── __init__.py         # Public API exports
+│       ├── working_memory.py   # WorkingMemoryGraph (PRESERVE)
+│       ├── replication.py      # AsyncReplicator + EdgeUpdate (PRESERVE)
+│       ├── models.py           # Prototype, Node, Association (PRESERVE)
+│       ├── inference.py        # Deterministic parsing (PRESERVE)
+│       ├── graph.py            # KnowledgeGraph (PRESERVE)
+│       └── backends/
+│           ├── __init__.py
+│           ├── protocol.py     # GraphClient protocol
+│           ├── networkx.py     # In-memory backend
+│           └── arango.py       # Optional Arango backend
+│
+├── tests/
+│   ├── test_working_memory.py  # (PRESERVE)
+│   ├── test_replication.py     # (PRESERVE)
+│   ├── test_inference.py       # (PRESERVE)
+│   └── conftest.py
+│
+└── examples/
+    ├── basic_usage.py
+    └── with_arango.py
+```
+
+-------------------------------------------------------------------------------
+AGENT INSTRUCTIONS: Restructure this repository
+-------------------------------------------------------------------------------
+
+STEP 1: Create new pyproject.toml for standalone package
+
+```toml
+[tool.poetry]
+name = "knowshowgo"
+version = "0.1.0"
+description = "Cognitive memory primitives for AI agents: working memory with reinforcement, async replication, and deterministic parsing"
+authors = ["Lehel Kovach <lehel@g.ucla.edu>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "knowshowgo", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+networkx = "^3.0"
+
+[tool.poetry.extras]
+arango = ["python-arango"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-asyncio = "^0.23"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+```
+
+STEP 2: Update src/knowshowgo/__init__.py
+
+```python
+"""
+knowshowgo: Cognitive memory primitives for AI agents.
+
+Core components:
+- WorkingMemoryGraph: Short-term activation with reinforcement learning
+- AsyncReplicator: Queue-based background persistence
+- KnowledgeGraph: Prototype-instance registry
+- process_instruction: Deterministic NLP parsing
+"""
+
+from .working_memory import WorkingMemoryGraph
+from .replication import AsyncReplicator, EdgeUpdate, GraphClient
+from .graph import KnowledgeGraph, Prototype, Instance
+from .inference import (
+    process_instruction,
+    infer_concept_kind,
+    extract_event_fields,
+)
+from .models import (
+    Prototype as PrototypeModel,
+    Node,
+    Association,
+    seed_core_prototypes,
+    ROOT_PROTOTYPE,
+    OBJECT_PROTOTYPE,
+    UNDEFINED_PROTOTYPE,
+)
+
+__version__ = "0.1.0"
+__all__ = [
+    # Working Memory
+    "WorkingMemoryGraph",
+    # Replication
+    "AsyncReplicator",
+    "EdgeUpdate", 
+    "GraphClient",
+    # Knowledge Graph
+    "KnowledgeGraph",
+    "Prototype",
+    "Instance",
+    # Inference
+    "process_instruction",
+    "infer_concept_kind",
+    "extract_event_fields",
+    # Models
+    "PrototypeModel",
+    "Node",
+    "Association",
+    "seed_core_prototypes",
+    "ROOT_PROTOTYPE",
+    "OBJECT_PROTOTYPE",
+    "UNDEFINED_PROTOTYPE",
+]
+```
+
+STEP 3: Create README.md for package
+
+```markdown
+# knowshowgo
+
+Cognitive memory primitives for AI agents.
+
+## Features
+
+- **WorkingMemoryGraph**: Short-term activation with Hebbian reinforcement
+- **AsyncReplicator**: Queue-based background persistence for high throughput
+- **KnowledgeGraph**: Prototype-instance registry with UUID management
+- **Deterministic Parsing**: Rule-based task/event classification (no LLM needed)
+
+## Installation
+
+```bash
+pip install knowshowgo
+
+# With ArangoDB support
+pip install knowshowgo[arango]
+```
+
+## Quick Start
+
+```python
+from knowshowgo import WorkingMemoryGraph, KnowledgeGraph, process_instruction
+
+# Create knowledge graph and working memory
+g = KnowledgeGraph()
+wm = WorkingMemoryGraph(reinforce_delta=1.0, max_weight=100.0)
+
+# Process natural language instruction (deterministic, no LLM)
+proto, inst = process_instruction(
+    g,
+    "At midnight, remind me to take out the trash.",
+    working_memory=wm,
+)
+
+print(proto.kind)                  # "event"
+print(inst.attributes["time"])     # "00:00"
+print(wm.get_weight(proto.id, inst.id))  # 1.0
+
+# Access reinforces the edge
+wm.access(proto.id, inst.id)
+print(wm.get_weight(proto.id, inst.id))  # 2.0
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Your Agent Loop                               │
+└─────────────────────────────────────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│WorkingMemory  │  │KnowledgeGraph │  │AsyncReplicator│
+│(session-scope)│  │(global)       │  │(background)   │
+│               │  │               │  │               │
+│- link()       │  │- prototypes   │  │- enqueue()    │
+│- access()     │  │- instances    │  │- persist to DB│
+│- decay()      │  │- associations │  │               │
+└───────────────┘  └───────────────┘  └───────────────┘
+```
+
+## Design Philosophy
+
+This library implements cognitive primitives based on:
+
+1. **Hebbian Learning**: "Neurons that fire together wire together"
+2. **Activation Spreading**: Frequently accessed paths become stronger
+3. **Immutable Schemas**: Prototypes never mutate (edits create new versions)
+4. **Separation of Concerns**: Each module has single responsibility
+```
+
+
+================================================================================
+PART 2: FILES TO PRESERVE (WITH ENHANCEMENTS)
+================================================================================
+
+These files contain the "superior engine design" and should be preserved:
+
+-------------------------------------------------------------------------------
+2.1 src/knowshowgo/working_memory.py - PRESERVE AS-IS
+-------------------------------------------------------------------------------
+
+This file is already clean and complete. The only enhancement needed is
+adding the decay_all() and get_activation_boost() methods (see Part 1 of
+salvage-osl-agent-prototype.txt for the enhanced version).
+
+-------------------------------------------------------------------------------
+2.2 src/knowshowgo/replication.py - PRESERVE AS-IS
+-------------------------------------------------------------------------------
+
+Clean implementation. Add non-blocking enqueue variant:
+
+```python
+# Add to AsyncReplicator class:
+def enqueue_nowait(self, update: EdgeUpdate) -> bool:
+    """Non-blocking enqueue. Returns False if queue is full."""
+    try:
+        self.queue.put_nowait(update)
+        return True
+    except asyncio.QueueFull:
+        return False
+```
+
+-------------------------------------------------------------------------------
+2.3 src/knowshowgo/models.py - PRESERVE WITH CLEANUP
+-------------------------------------------------------------------------------
+
+The immutable Prototype pattern is valuable. Enhance with:
+
+```python
+# Add helper for schema evolution:
+@dataclass(frozen=True)
+class Prototype:
+    # ... existing fields ...
+    
+    def evolve(
+        self,
+        name: Optional[str] = None,
+        schema_meta: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        created_by: Optional[str] = None,
+    ) -> "Prototype":
+        """Create new version of this prototype with changes."""
+        return Prototype(
+            id=gen_id(),
+            name=name or self.name,
+            schema_meta=schema_meta or self.schema_meta,
+            tags=tags if tags is not None else self.tags,
+            created_at=now_utc(),
+            created_by=created_by,
+            previous_version_id=self.id,  # Link to this version
+        )
+```
+
+-------------------------------------------------------------------------------
+2.4 src/knowshowgo/inference.py - PRESERVE WITH EXTENSIONS
+-------------------------------------------------------------------------------
+
+Add more intent categories and better time parsing:
+
+```python
+# Extended keyword sets
+EVENT_KEYWORDS = {"remind", "schedule", "event", "meet", "meeting", "appointment"}
+TASK_KEYWORDS = {"todo", "task", "do", "complete", "finish", "fix", "implement"}
+QUERY_KEYWORDS = {"what", "when", "where", "who", "how", "why", "show", "list"}
+LEARN_KEYWORDS = {"remember", "learn", "note", "save", "store"}
+
+def infer_concept_kind(instruction: str) -> str:
+    """Extended classification with more categories."""
+    text = instruction.lower()
+    
+    if any(kw in text for kw in EVENT_KEYWORDS):
+        return "event"
+    if any(kw in text for kw in QUERY_KEYWORDS):
+        return "query"
+    if any(kw in text for kw in LEARN_KEYWORDS):
+        return "note"
+    return "task"
+```
+
+-------------------------------------------------------------------------------
+2.5 tests/ - PRESERVE ALL TESTS
+-------------------------------------------------------------------------------
+
+All test files should be preserved:
+- tests/test_working_memory.py
+- tests/test_replication.py
+- tests/test_inference.py
+- tests/conftest.py
+
+
+================================================================================
+PART 3: ECHO BACK TO osl-agent-prototype
+================================================================================
+
+The improvements made to the knowshowgo package should also be reflected
+back in osl-agent-prototype's KSG modules. This creates bidirectional value.
+
+-------------------------------------------------------------------------------
+3.1 Sync working_memory.py
+-------------------------------------------------------------------------------
+
+The enhanced WorkingMemoryGraph (with decay, get_activation_boost) should
+exist in BOTH repositories:
+
+```
+knowshowgo/src/knowshowgo/working_memory.py  (canonical)
+    ↓ (copy with import path changes)
+osl-agent-prototype/src/personal_assistant/working_memory.py
+```
+
+-------------------------------------------------------------------------------
+3.2 Sync async_replicator.py
+-------------------------------------------------------------------------------
+
+```
+knowshowgo/src/knowshowgo/replication.py  (canonical)
+    ↓ (copy with import path changes)
+osl-agent-prototype/src/personal_assistant/async_replicator.py
+```
+
+-------------------------------------------------------------------------------
+3.3 Sync deterministic parsing
+-------------------------------------------------------------------------------
+
+```
+knowshowgo/src/knowshowgo/inference.py  (canonical)
+    ↓ (extract utility functions)
+osl-agent-prototype/src/personal_assistant/deterministic_parser.py
+```
+
+-------------------------------------------------------------------------------
+3.4 Consider: Use knowshowgo as dependency
+-------------------------------------------------------------------------------
+
+Long-term, osl-agent-prototype could import knowshowgo as a dependency:
+
+```toml
+# In osl-agent-prototype pyproject.toml:
+[tool.poetry.dependencies]
+knowshowgo = "^0.1.0"
+```
+
+```python
+# In osl-agent-prototype agent.py:
+from knowshowgo import WorkingMemoryGraph, AsyncReplicator
+```
+
+This avoids code duplication and establishes knowshowgo as the canonical
+source for these cognitive primitives.
+
+
+================================================================================
+PART 4: MIGRATION COMMANDS FOR THIS REPO
+================================================================================
+
+Execute these commands to restructure this repository:
+
+```bash
+# 1. Verify we're on the right branch
+git checkout claude-opus-4
+
+# 2. Create new package structure
+mkdir -p src/knowshowgo/backends
+mkdir -p examples
+
+# 3. Move existing files (they're already in src/knowshowgo/)
+# - working_memory.py ✓
+# - replication.py ✓
+# - models.py ✓
+# - inference.py ✓
+# - graph.py ✓
+
+# 4. Create backend protocol file
+cat > src/knowshowgo/backends/__init__.py << 'EOF'
+"""Backend implementations for knowshowgo storage."""
+from .protocol import GraphClient
+EOF
+
+cat > src/knowshowgo/backends/protocol.py << 'EOF'
+"""Protocol definitions for storage backends."""
+from typing import Protocol
+
+
+class GraphClient(Protocol):
+    """Protocol for persistence backends."""
+    
+    async def increment_edge_weight(
+        self, source: str, target: str, delta: float, max_weight: float
+    ) -> None:
+        """Atomically increment edge weight with cap."""
+        ...
+EOF
+
+# 5. Move arango client to backends
+mv src/knowshowgo/arangodb_client.py src/knowshowgo/backends/arango.py
+
+# 6. Update imports in __init__.py (see Part 1)
+
+# 7. Remove packages/ directory (was for microservice pattern, now integrated)
+# Keep as reference but mark deprecated
+mv packages packages.deprecated
+
+# 8. Run tests to verify nothing broke
+pytest tests/ -v
+
+# 9. Commit the restructure
+git add .
+git commit -m "refactor: restructure as knowshowgo package
+
+- Reorganize for publishable package structure
+- Move arango backend to backends/ subdirectory
+- Update exports in __init__.py
+- Preserve all core cognitive primitives:
+  - WorkingMemoryGraph
+  - AsyncReplicator
+  - Immutable Prototype model
+  - Deterministic inference
+"
+
+# 10. Push changes
+git push -u origin claude-opus-4
+```
+
+
+================================================================================
+PART 5: PUBLISHING ROADMAP (FUTURE)
+================================================================================
+
+Once the package is stable, publish to PyPI:
+
+```bash
+# 1. Build package
+poetry build
+
+# 2. Publish to TestPyPI first
+poetry publish -r testpypi
+
+# 3. Test installation
+pip install -i https://test.pypi.org/simple/ knowshowgo
+
+# 4. Publish to PyPI
+poetry publish
+
+# 5. Update osl-agent-prototype to use published package
+cd ../osl-agent-prototype
+poetry add knowshowgo
+```
+
+
+================================================================================
+PART 6: VERSION STRATEGY
+================================================================================
+
+Maintain version parity between repos:
+
+```
+knowshowgo v0.1.0
+├── WorkingMemoryGraph (initial)
+├── AsyncReplicator (initial)
+├── Deterministic inference (initial)
+└── Immutable Prototype model (initial)
+
+knowshowgo v0.2.0 (planned)
+├── Add decay_all() to WorkingMemoryGraph
+├── Add get_activation_boost()
+├── Add batch operations to AsyncReplicator
+└── Extended inference categories
+
+knowshowgo v1.0.0 (milestone)
+├── Stable API
+├── Full documentation
+├── Integration tests with osl-agent-prototype
+└── Published to PyPI
+```
+
+
+================================================================================
+SUMMARY: WHAT THIS REPO BECOMES
+================================================================================
+
+BEFORE (deprecated osl-agent):
+  - Incomplete agent prototype
+  - Valuable memory primitives buried in code
+  - No clear purpose after deprecation
+
+AFTER (knowshowgo package):
+  - Standalone cognitive primitives library
+  - Clean, publishable package structure
+  - Used as dependency by osl-agent-prototype
+  - Continued development of memory/activation concepts
+  - Clear separation: knowshowgo = memory engine, osl-agent-prototype = agent
+
+This transformation preserves the valuable work in this repo while giving
+it a clear purpose going forward.
+
+
+================================================================================
+END OF SALVAGE PLAN FOR knowshowgo
+================================================================================
