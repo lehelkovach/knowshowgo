@@ -45,16 +45,29 @@ export class InMemoryMemory {
 
     // Simple similarity if embedding provided
     if (queryEmbedding && results.length > 0) {
+      const q = (query || '').toLowerCase();
+      const tokens = q
+        .split(/[^a-z0-9]+/i)
+        .map(t => t.trim())
+        .filter(t => t.length >= 3);
+
       results = results
         .map(node => {
           if (!node.llmEmbedding) {
-            return { node, similarity: 0 };
+            return { node, similarity: 0, textBoost: 0 };
           }
           const similarity = this._cosineSimilarity(queryEmbedding, node.llmEmbedding);
-          return { node, similarity };
+          const label = String(node.props.label || node.props.name || '').toLowerCase();
+          const name = String(node.props.name || '').toLowerCase();
+          const haystack = `${label} ${name}`;
+          const textBoost =
+            (q && haystack.includes(q)) ? 3 :
+            tokens.reduce((acc, t) => (haystack.includes(t) ? acc + 1 : acc), 0);
+          return { node, similarity, textBoost };
         })
         .filter(r => r.similarity >= 0) // Filter out nodes without embeddings
-        .sort((a, b) => b.similarity - a.similarity)
+        // Hybrid rank: strong text match wins, then embedding similarity
+        .sort((a, b) => (b.textBoost - a.textBoost) || (b.similarity - a.similarity))
         .slice(0, topK)
         .map(r => ({
           uuid: r.node.uuid,

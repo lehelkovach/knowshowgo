@@ -18,6 +18,17 @@ export class KSGORM {
   }
 
   /**
+   * Get a previously registered ORM model class.
+   *
+   * @param {string} prototypeName
+   * @returns {Promise<Function|null>}
+   */
+  async getModel(prototypeName) {
+    const entry = this.registeredPrototypes.get(prototypeName);
+    return entry?.class ?? null;
+  }
+
+  /**
    * Register a prototype and create JavaScript class.
    * 
    * @param {string} prototypeName - Prototype name (e.g., 'Person')
@@ -75,11 +86,13 @@ export class KSGORM {
     class KSGObject {
       constructor(conceptUuid, hydrated = false) {
         this._conceptUuid = conceptUuid;
+        this.uuid = conceptUuid; // convenience for REST and callers
         this._ksg = self.ksg;
         this._orm = self;
         this._cache = {};  // Property cache
         this._loaded = hydrated;  // Whether properties loaded
         this._documentCache = null;  // Cached JSON document
+        this._documentDirty = false; // Whether document needs persisting
       }
 
       /**
@@ -107,9 +120,9 @@ export class KSGORM {
         const value = await self._getPropertyValue(this._conceptUuid, propName);
         this._cache[propName] = value;
         
-        // Update cached document
+        // Update cached document in-memory only (avoid side-effectful writes on reads)
         if (value !== undefined) {
-          await this._updateCachedDocumentProperty(propName, value);
+          this._updateCachedDocumentProperty(propName, value);
         }
         
         return value;
@@ -127,8 +140,8 @@ export class KSGORM {
         // Update value node or create new one
         await self._setPropertyValue(this._conceptUuid, propName, value);
 
-        // Update cached document
-        await this._updateCachedDocumentProperty(propName, value);
+        // Update cached document (defer persistence until save)
+        this._updateCachedDocumentProperty(propName, value);
       }
 
       /**
@@ -154,9 +167,7 @@ export class KSGORM {
           this._documentCache = {};
         }
         this._documentCache[propName] = value;
-
-        // Update document node
-        await self._updateCachedDocument(this._conceptUuid, this._documentCache);
+        this._documentDirty = true;
       }
 
       /**
@@ -168,8 +179,11 @@ export class KSGORM {
           await this._setProperty(propName, value);
         }
 
-        // Update cached document
-        await self._updateCachedDocument(this._conceptUuid, this._documentCache || this._cache);
+        // Persist cached document once per save
+        if (this._documentDirty) {
+          await self._updateCachedDocument(this._conceptUuid, this._documentCache || this._cache);
+          this._documentDirty = false;
+        }
       }
 
       /**
@@ -231,6 +245,15 @@ export class KSGORM {
       instance._cache = { ...data };
       instance._documentCache = { ...data };
       return instance;
+    };
+
+    /**
+     * Get an instance by UUID.
+     */
+    KSGObject.get = async function(uuid) {
+      const node = await self.ksg.getConcept(uuid);
+      if (!node) return null;
+      return new KSGObject(uuid, false);
     };
 
     /**
@@ -324,8 +347,28 @@ export class KSGORM {
       // Update existing value node
       const valueNode = await this.memory.getNode(existingEdge.toNode);
       if (valueNode) {
-        valueNode.props.literalValue = value;
-        valueNode.props.label = String(value);
+        // Normalize to JSON-friendly shape (matches KnowShowGo value node behavior)
+        const vt = valueNode.props?.valueType || typeof value;
+        let normalized = value;
+        if (vt === 'datetime') {
+          const d = value instanceof Date ? value : new Date(value);
+          normalized = Number.isNaN(d.getTime()) ? value : d.toISOString();
+        } else if (vt === 'url') {
+          try {
+            normalized = new URL(String(value)).toString();
+          } catch {
+            normalized = String(value);
+          }
+        } else if (vt === 'number') {
+          normalized = Number(value);
+        } else if (vt === 'boolean') {
+          normalized = Boolean(value);
+        } else if (vt === 'string') {
+          normalized = String(value);
+        }
+
+        valueNode.props.literalValue = normalized;
+        valueNode.props.label = normalized === null ? 'null' : String(normalized);
         await this.memory.upsert(valueNode, new Provenance({
           source: 'user',
           ts: new Date().toISOString(),

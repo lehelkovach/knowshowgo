@@ -1,0 +1,53 @@
+name: Deploy to OCI VM
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-oci-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH (git pull + docker compose)
+        shell: bash
+        env:
+          OCI_SSH_HOST: ${{ secrets.OCI_SSH_HOST }}
+          OCI_SSH_USER: ${{ secrets.OCI_SSH_USER }}
+          OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          OCI_SSH_PORT: ${{ secrets.OCI_SSH_PORT }}
+          OCI_APP_DIR: ${{ secrets.OCI_APP_DIR }}
+        run: |
+          set -euo pipefail
+
+          : "${OCI_SSH_HOST:?Missing secret OCI_SSH_HOST}"
+          : "${OCI_SSH_USER:?Missing secret OCI_SSH_USER}"
+          : "${OCI_SSH_PRIVATE_KEY:?Missing secret OCI_SSH_PRIVATE_KEY}"
+
+          OCI_SSH_PORT="${OCI_SSH_PORT:-22}"
+          OCI_APP_DIR="${OCI_APP_DIR:-/opt/knowshowgo/repo}"
+
+          install -m 700 -d ~/.ssh
+          printf "%s" "$OCI_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Add host key (avoid interactive prompt)
+          ssh-keyscan -p "$OCI_SSH_PORT" -H "$OCI_SSH_HOST" >> ~/.ssh/known_hosts
+
+          ssh -p "$OCI_SSH_PORT" -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes "$OCI_SSH_USER@$OCI_SSH_HOST" \
+            "set -euo pipefail; \
+             cd \"$OCI_APP_DIR\"; \
+             git fetch --all --prune; \
+             git reset --hard origin/main; \
+             docker compose up -d --build; \
+             curl -fsS http://localhost:3000/health >/dev/null; \
+             echo \"Deployed successfully.\""
+

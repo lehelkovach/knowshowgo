@@ -40,6 +40,26 @@ KSG_MEMORY_BACKEND=arango npm start
 
 The API will be available at `http://localhost:3000`
 
+## OSL Agent Prototype Integration (seed + procedure endpoints)
+
+This repo now includes an **idempotent seed** intended to provide the minimal ontology/prototypes used by `osl-agent-prototype` (e.g. `Procedure`, `Step`, `Task`, `QueueItem`, etc.).
+
+```bash
+# seed the ontology into your configured backend (in-memory or Arango)
+npm run seed:osl-agent
+```
+
+Compatibility endpoints:
+- `POST /api/seed/osl-agent`
+- `POST /api/procedures` (create Procedure + Steps + DAG deps)
+- `POST /api/procedures/search`
+
+## Quick Start - Web UI (Create Knode)
+
+Start the server, then open:
+
+- `http://localhost:3000/ui/`
+
 ## Quick Start - Docker
 
 ```bash
@@ -120,6 +140,8 @@ Embedding Service (OpenAI/Local/etc.)
 ## Documentation
 
 - [Handoff Document](./HANDOFF.md) - **Start here** - Complete extraction and deployment guide
+- [Oracle Cloud Deployment](./docs/DEPLOYMENT-OCI.md)
+- [OSL Agent Prototype Integration](./docs/OSL-AGENT-PROTOTYPE-INTEGRATION.md)
 - [API Reference](./docs/API.md) - Full API documentation
 - [REST API](./src/server/rest-api.js) - REST API server implementation
 - [Python Client](./api/python/client.py) - Python REST API client

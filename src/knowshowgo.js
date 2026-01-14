@@ -88,9 +88,13 @@ export class KnowShowGo {
     await this.memory.upsert(proto, prov, { embeddingRequest: true });
 
     // Unified architecture: Multiple inheritance via "is_a" associations
-    const parents = parentPrototypeUuids || (basePrototypeUuid ? [basePrototypeUuid] : []);
+    const parents = [
+      ...(basePrototypeUuid ? [basePrototypeUuid] : []),
+      ...(parentPrototypeUuids ?? [])
+    ];
+    const uniqueParents = [...new Set(parents.filter(Boolean))];
     
-    for (const parentUuid of parents) {
+    for (const parentUuid of uniqueParents) {
       // Use "is_a" association for multiple inheritance (unified architecture)
       await this.addAssociation({
         fromConceptUuid: proto.uuid,
@@ -162,6 +166,8 @@ export class KnowShowGo {
         status: 'active',
         namespace: 'public',
         prototypeUuid: prototypeUuid, // Backward compat
+        // Preserve commonly expected fields
+        name: jsonObj.name ?? label,
         ...Object.fromEntries(
           Object.entries(jsonObj).filter(([k]) => 
             !['name', 'label', 'aliases', 'description', 'summary'].includes(k)
@@ -216,7 +222,8 @@ export class KnowShowGo {
     toConceptUuid,
     relationType,
     strength = 1.0,
-    provenance = null
+    provenance = null,
+    props = {}
   }) {
     const prov = provenance || new Provenance({
       source: 'user',
@@ -231,7 +238,8 @@ export class KnowShowGo {
       rel: relationType,
       props: {
         w: strength,
-        status: 'accepted'
+        status: 'accepted',
+        ...props
       }
     });
 
@@ -291,6 +299,101 @@ export class KnowShowGo {
   }
 
   /**
+   * List all edges in the current memory backend.
+   *
+   * Works for Map-backed in-memory storage and Arango proxy storage.
+   *
+   * @private
+   * @returns {Promise<Array>}
+   */
+  async _listEdges() {
+    const edges = this.memory?.edges;
+    if (!edges) return [];
+
+    if (edges instanceof Map) {
+      return Array.from(edges.values());
+    }
+
+    // ArangoMemory exposes edges.values as an async function returning an array
+    if (typeof edges.values === 'function') {
+      const out = edges.values();
+      return Array.isArray(out) ? out : await out;
+    }
+
+    return [];
+  }
+
+  _isUuid(v) {
+    return typeof v === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  }
+
+  _inferValueType(value) {
+    if (value instanceof Date) return 'datetime';
+    if (typeof value === 'number') return 'number';
+    if (typeof value === 'boolean') return 'boolean';
+    if (typeof value === 'string') return 'string';
+    if (value === null) return 'null';
+    return 'json';
+  }
+
+  _normalizeLiteral(value, valueType) {
+    switch (valueType) {
+      case 'number': {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error('Invalid number literal');
+        }
+        return value;
+      }
+      case 'boolean': {
+        if (typeof value !== 'boolean') throw new Error('Invalid boolean literal');
+        return value;
+      }
+      case 'datetime': {
+        if (value instanceof Date) return value.toISOString();
+        if (typeof value === 'string') {
+          const d = new Date(value);
+          if (Number.isNaN(d.getTime())) throw new Error('Invalid datetime literal');
+          return d.toISOString();
+        }
+        throw new Error('Invalid datetime literal');
+      }
+      case 'url': {
+        if (typeof value !== 'string') throw new Error('Invalid url literal');
+        try {
+          const u = new URL(value);
+          return u.toString();
+        } catch {
+          throw new Error('Invalid url literal');
+        }
+      }
+      case 'node_ref': {
+        if (!this._isUuid(value)) throw new Error('Invalid node_ref literal');
+        return value;
+      }
+      case 'string': {
+        if (typeof value !== 'string') throw new Error('Invalid string literal');
+        return value;
+      }
+      case 'null': {
+        return null;
+      }
+      case 'json': {
+        // JSON-serializable check (best-effort)
+        try {
+          JSON.stringify(value);
+        } catch {
+          throw new Error('Invalid json literal');
+        }
+        return value;
+      }
+      default: {
+        throw new Error(`Unsupported valueType: ${valueType}`);
+      }
+    }
+  }
+
+  /**
    * Get a concept by UUID.
    * 
    * @param {string} conceptUuid - Concept UUID
@@ -298,6 +401,37 @@ export class KnowShowGo {
    */
   async getConcept(conceptUuid) {
     return await this.memory.getNode(conceptUuid);
+  }
+
+  /**
+   * Get a prototype by UUID.
+   *
+   * @param {string} prototypeUuid
+   * @returns {Promise<Object|null>}
+   */
+  async getPrototype(prototypeUuid) {
+    const node = await this.getConcept(prototypeUuid);
+    if (!node) return null;
+    if (node.props?.isPrototype !== true) return null;
+    return node;
+  }
+
+  /**
+   * Get associations (edges) for a concept.
+   *
+   * @param {string} conceptUuid
+   * @param {'incoming'|'outgoing'|'both'} [direction='both']
+   * @returns {Promise<Array>}
+   */
+  async getAssociations(conceptUuid, direction = 'both') {
+    const edges = await this._listEdges();
+    if (direction === 'incoming') {
+      return edges.filter(e => e.toNode === conceptUuid);
+    }
+    if (direction === 'outgoing') {
+      return edges.filter(e => e.fromNode === conceptUuid);
+    }
+    return edges.filter(e => e.fromNode === conceptUuid || e.toNode === conceptUuid);
   }
 
   /**
@@ -377,19 +511,21 @@ export class KnowShowGo {
       traceId: 'knowshowgo'
     });
 
-    const valueStr = String(value);
+    const normalizedType = valueType || this._inferValueType(value);
+    const normalizedValue = this._normalizeLiteral(value, normalizedType);
+    const valueStr = normalizedValue === null ? 'null' : String(normalizedValue);
     if (!embedding && this.embedFn) {
       embedding = await this.embedFn(valueStr);
     }
 
     const valueNode = new Node({
       kind: 'topic',
-      labels: [valueStr, `value:${valueType}`],
+      labels: [valueStr, `value:${normalizedType}`],
       props: {
         label: valueStr,
         isValue: true,
-        valueType: valueType,
-        literalValue: value,  // For quick access
+        valueType: normalizedType,
+        literalValue: normalizedValue, // JSON-friendly normalized value
         status: 'active',
         namespace: 'public'
       },
@@ -459,11 +595,12 @@ export class KnowShowGo {
 
       // Get or create property node
       const propNode = await this.getOrCreateProperty(propName, typeof propValue);
+      const valueType = propNode.props?.valueType || this._inferValueType(propValue);
 
       // Create value node
-      const valueNode = await this.createValueNode({
+      const valueUuid = await this.createValueNode({
         value: propValue,
-        valueType: typeof propValue,
+        valueType: valueType,
         embedding: await this.embedFn(String(propValue)),
         provenance: prov
       });
@@ -483,7 +620,7 @@ export class KnowShowGo {
       // Property --[has_value]--> Value
       await this.addAssociation({
         fromConceptUuid: propNode.uuid,
-        toConceptUuid: valueNode.uuid,
+        toConceptUuid: valueUuid,
         relationType: 'has_value',
         strength: 1.0,
         provenance: prov
@@ -492,7 +629,7 @@ export class KnowShowGo {
       // Concept --[has_value]--> Value (for quick access, with property name in props)
       await this.addAssociation({
         fromConceptUuid: concept.uuid,
-        toConceptUuid: valueNode.uuid,
+        toConceptUuid: valueUuid,
         relationType: 'has_value',
         strength: 1.0,
         provenance: prov,
@@ -519,15 +656,21 @@ export class KnowShowGo {
     });
 
     if (results.length > 0 && results[0].props?.isProperty) {
-      return results[0].uuid;
+      const existing = await this.getConcept(results[0].uuid);
+      if (existing) return existing;
     }
 
     // Create new property node
-    return await this.createProperty({
+    const createdUuid = await this.createProperty({
       name: propName,
       valueType: valueType,
       embedding: await this.embedFn(`property ${propName} ${valueType}`)
     });
+    const created = await this.getConcept(createdUuid);
+    if (!created) {
+      throw new Error(`Failed to load created property node: ${createdUuid}`);
+    }
+    return created;
   }
 
   /**
@@ -547,7 +690,7 @@ export class KnowShowGo {
     }
 
     // Find direct "has_value" associations with propertyName in props
-    const edges = Array.from(this.memory.edges?.values() || []);
+    const edges = await this._listEdges();
     const hasValueEdges = edges.filter(e => 
       e.fromNode === conceptUuid && 
       e.rel === 'has_value' &&
@@ -743,7 +886,7 @@ export class KnowShowGo {
     const tagEmbeddings = [];
 
     // 1. Get all edges connected to this node
-    const edges = Array.from(this.memory.edges?.values() || []);
+    const edges = await this._listEdges();
     
     // 2. Find all tag nodes linked via edges (both incoming and outgoing)
     const connectedNodes = new Set();
@@ -842,7 +985,7 @@ export class KnowShowGo {
    * @private
    */
   async _getDocumentNode(conceptUuid) {
-    const edges = Array.from(this.memory.edges?.values() || []);
+    const edges = await this._listEdges();
     const docEdge = edges.find(e =>
       e.fromNode === conceptUuid &&
       e.rel === 'has_document'
