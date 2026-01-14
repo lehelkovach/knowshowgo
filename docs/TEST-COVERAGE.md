@@ -1,99 +1,167 @@
 # Test Coverage and Migration Guide
 
+## Current Test Status
+
+**Total Tests:** 54 passing
+**Test Suites:** 7
+
+```
+✅ tests/assertion.test.js         - 19 tests (NEW)
+✅ tests/knowshowgo.test.js        - Core API
+✅ tests/orm.test.js               - ORM functionality
+✅ tests/rest-api.test.js          - REST endpoints
+✅ tests/refined-architecture.test.js
+✅ tests/fully-unified-architecture.test.js
+✅ tests/multiple-inheritance.test.js
+```
+
+---
+
+## MVP Features Test Coverage
+
+### Assertion Model ✅ NEW
+- Assertion creation with required fields
+- Custom truth/strength values
+- Provenance tracking
+- Version chaining (prevAssertionId)
+
+### WTA Resolution ✅ NEW
+- Score calculation based on policy weights
+- Winner selection by truth
+- Multiple predicate resolution
+- VoteScore consideration
+- Evidence with all candidates
+
+### Working Memory ✅ NEW
+- Link creation between entities
+- Hebbian reinforcement on access
+- Max weight cap enforcement
+- Decay all weights
+- Remove links below threshold
+
+### NeuroDAG Concepts ✅ NEW
+- Proposition node structure
+- Rule node with associations
+- Fuzzy implication calculation
+- Attack/inhibition calculation
+- Partial attack handling
+
+---
+
 ## Python Test Files Reference
 
-The following Python test files exist in the main repository and should be considered when implementing JavaScript tests:
+The following Python test files exist in the reference implementation:
 
 ### Core Tests
 
-1. **`test_knowshowgo.py`**
+1. **`test_knowshowgo.py`** → `tests/knowshowgo.test.js` ✅
    - Prototype and concept creation
    - Concept linking to prototypes
    - Versioned concepts
 
-2. **`test_knowshowgo_associations.py`**
+2. **`test_knowshowgo_associations.py`** → Covered in `knowshowgo.test.js` ✅
    - Association creation
    - Association strength/weight
    - Multiple relationship types
 
-3. **`test_knowshowgo_recursive.py`**
+3. **`test_knowshowgo_recursive.py`** → Partial in `fully-unified-architecture.test.js` ⚠️
    - Recursive concept creation
    - Nested structures (DAGs, procedures)
    - Parent-child relationships
 
-4. **`test_knowshowgo_generalization.py`**
+4. **`test_knowshowgo_generalization.py`** → Not yet implemented ❌
    - Concept generalization
    - Exemplar merging
    - Taxonomy hierarchy creation
 
-5. **`test_knowshowgo_dag_and_recall.py`**
+5. **`test_knowshowgo_dag_and_recall.py`** → Partial in `assertion.test.js` ⚠️
    - DAG execution
    - Procedure recall
    - Similarity-based retrieval
 
 ### ORM Tests
 
-6. **`test_ksg_orm.py`**
+6. **`test_ksg_orm.py`** → `tests/orm.test.js` ✅
    - Object hydration
    - Prototype property inheritance
    - Object creation and saving
 
-7. **`test_ksg_orm_write.py`**
+7. **`test_ksg_orm_write.py`** → `tests/orm.test.js` ✅
    - Property updates
    - Object persistence
    - Write operations
 
-8. **`test_ksg_seed.py`**
+8. **`test_ksg_seed.py`** → Not yet implemented ❌
    - Prototype seeding
    - Initial ontology setup
    - Seed data validation
 
-### Integration Tests
-
-9. **`test_agent_ksg_prototype_concept.py`**
-   - Agent integration with KSG
-   - Prototype/concept usage in agent context
-
-10. **`test_agent_arango_ksg_integration.py`**
-    - ArangoDB backend integration
-    - End-to-end agent workflows
+---
 
 ## JavaScript Test Status
 
-### ✅ Implemented
+### ✅ Implemented (54 tests)
 
 - Basic prototype creation
 - Basic concept creation
 - Versioned concepts
 - Associations
 - Concept search
+- ORM prototype registration
+- ORM instance creation/retrieval
+- REST API endpoints
+- Multiple inheritance
+- Fully unified architecture
+- Refined architecture (mean embeddings)
+- **Assertion model (MVP)**
+- **WTA Resolution (MVP)**
+- **Working Memory (MVP)**
+- **NeuroDAG concepts (MVP)**
 
 ### ⏳ To Be Implemented
 
-- [ ] Recursive concept creation
+- [ ] Recursive concept creation (full)
 - [ ] Concept generalization
-- [ ] ORM-style object hydration
-- [ ] Property inheritance
-- [ ] DAG execution
-- [ ] Memory backend implementations (ArangoDB, ChromaDB)
+- [ ] Seed data validation
+- [ ] Memory backend implementations (ArangoDB live tests)
+- [ ] EntityFacade ORM pattern
+- [ ] AsyncReplicator
+- [ ] GraphRAG query tests
+- [ ] TransE link prediction tests
+
+---
 
 ## Test Migration Priority
 
-1. **High Priority** (Core functionality)
-   - ✅ Prototype/concept creation
-   - ✅ Associations
-   - ✅ Versioning
-   - [ ] Recursive creation
-   - [ ] Search and recall
+### Phase 1: MVP (Week 1-2) ✅ READY
+- ✅ Prototype/concept creation
+- ✅ Associations
+- ✅ Versioning
+- ✅ ORM basic operations
+- ✅ REST API endpoints
+- ✅ **Assertion model**
+- ✅ **WTA Resolution**
+- ✅ **Working Memory**
 
-2. **Medium Priority** (Advanced features)
-   - [ ] Generalization
-   - [ ] ORM hydration
-   - [ ] Property inheritance
+### Phase 2: Implementation (Week 2-3)
+- [ ] EntityFacade integration tests
+- [ ] Snapshot/Evidence API tests
+- [ ] Working Memory REST endpoints
+- [ ] AsyncReplicator tests
 
-3. **Low Priority** (Integration)
-   - [ ] Memory backend tests
-   - [ ] End-to-end workflows
+### Phase 3: NeuroDAG (Week 3-4)
+- [ ] NeuroDAG creation tests
+- [ ] Rule/proposition tests
+- [ ] Inference engine tests
+- [ ] DAG reconstruction tests
+
+### Phase 4: Advanced (Post-MVP)
+- [ ] GraphRAG query tests
+- [ ] TransE link prediction
+- [ ] Fact embedding search
+- [ ] ArangoDB integration tests
+
+---
 
 ## Running Tests
 
@@ -106,20 +174,35 @@ npm run test:coverage
 
 # Watch mode
 npm run test:watch
+
+# Run specific test file
+npm test -- tests/assertion.test.js
 ```
+
+---
 
 ## Test Structure
 
 ```
 tests/
-├── knowshowgo.test.js           # Core API tests
-├── associations.test.js          # Association tests (to be added)
-├── recursive.test.js             # Recursive creation tests (to be added)
-├── generalization.test.js        # Generalization tests (to be added)
-├── orm.test.js                   # ORM tests (to be added)
-└── memory/
-    ├── in-memory.test.js         # In-memory backend tests (to be added)
-    ├── arango.test.js            # ArangoDB backend tests (to be added)
-    └── chroma.test.js            # ChromaDB backend tests (to be added)
+├── assertion.test.js             # NEW: Assertion, WTA, WorkingMemory, NeuroDAG
+├── knowshowgo.test.js            # Core API tests
+├── orm.test.js                   # ORM tests
+├── rest-api.test.js              # REST endpoint tests
+├── refined-architecture.test.js  # Mean embeddings
+├── fully-unified-architecture.test.js
+├── multiple-inheritance.test.js
+│
+├── (planned)
+├── entity-facade.test.js         # EntityFacade ORM
+├── working-memory.test.js        # Standalone WM tests
+├── wta-resolver.test.js          # Standalone WTA tests
+├── neurodag.test.js              # NeuroDAG operations
+└── integration/
+    └── agent-memory.test.js      # E2E agent memory tests
 ```
 
+---
+
+*Last Updated: 2026-01-14*
+*Tests: 54 passing | Suites: 7*
