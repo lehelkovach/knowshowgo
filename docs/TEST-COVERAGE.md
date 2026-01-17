@@ -17,6 +17,28 @@
 
 ---
 
+## Line Coverage Summary
+
+| File | Statements | Branches | Functions | Lines |
+|------|------------|----------|-----------|-------|
+| **All files** | **71.91%** | **60.15%** | **75.67%** | **74.57%** |
+| `src/knowshowgo.js` | 77.81% | 67.07% | 93.93% | 82.71% |
+| `src/models.js` | 100% | 61.76% | 100% | 100% |
+| `src/memory/in-memory.js` | 87.23% | 60% | 86.66% | 86.66% |
+| `src/memory/arango-memory.js` | 0% | 0% | 0% | 0% |
+| `src/orm/ksg-orm.js` | 89.30% | 66.32% | 93.33% | 90.44% |
+| `src/seed/osl_agent.js` | 91.42% | 70.96% | 92.30% | 100% |
+| `src/server/rest-api.js` | 72.36% | 63.05% | 80.64% | 74.65% |
+
+### Coverage Notes
+
+- **arango-memory.js** has 0% coverage - requires live ArangoDB for testing
+- **models.js** has 100% line coverage
+- Core API and ORM have good coverage (80%+)
+- REST API could use more endpoint testing
+
+---
+
 ## MVP Features Test Coverage
 
 ### Assertion Model ✅ NEW
@@ -205,4 +227,4 @@ tests/
 ---
 
 *Last Updated: 2026-01-14*
-*Tests: 54 passing | Suites: 7*
+*Tests: 54 passing | Suites: 7 | Line Coverage: 74.57%*
