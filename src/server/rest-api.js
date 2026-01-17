@@ -557,6 +557,89 @@ app.get('/api/orm/:prototypeName/:uuid', async (req, res) => {
   }
 });
 
+// ===== Assertion Endpoints (v0.2.0) =====
+
+/**
+ * POST /api/assertions
+ * Create a new assertion
+ */
+app.post('/api/assertions', async (req, res) => {
+  try {
+    const { subject, predicate, object, truth, source } = req.body;
+    
+    if (!subject) {
+      return res.status(400).json({ error: 'subject is required' });
+    }
+    if (!predicate) {
+      return res.status(400).json({ error: 'predicate is required' });
+    }
+    if (object === undefined) {
+      return res.status(400).json({ error: 'object is required' });
+    }
+
+    const assertion = await ksg.createAssertion({
+      subject,
+      predicate,
+      object,
+      truth: truth ?? 1.0,
+      source: source || 'user'
+    });
+
+    res.json(assertion);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/assertions
+ * Query assertions with optional filters
+ * Query params: subject, predicate, object
+ */
+app.get('/api/assertions', async (req, res) => {
+  try {
+    const { subject, predicate, object } = req.query;
+    const filters = {};
+    
+    if (subject) filters.subject = subject;
+    if (predicate) filters.predicate = predicate;
+    if (object !== undefined) filters.object = object;
+
+    const assertions = await ksg.getAssertions(filters);
+    res.json({ assertions });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/entities/:id/snapshot
+ * Get resolved values for an entity (highest truth wins)
+ */
+app.get('/api/entities/:id/snapshot', async (req, res) => {
+  try {
+    const snapshot = await ksg.snapshot(req.params.id);
+    res.json({ snapshot });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/entities/:id/evidence
+ * Get all competing assertions for an entity
+ * Query params: predicate (optional)
+ */
+app.get('/api/entities/:id/evidence', async (req, res) => {
+  try {
+    const { predicate } = req.query;
+    const evidence = await ksg.evidence(req.params.id, predicate || null);
+    res.json({ evidence });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error(err);

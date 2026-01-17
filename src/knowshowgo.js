@@ -8,6 +8,7 @@
  * - Supports uncertainty handling via provenance confidence scores
  */
 
+import { v4 as uuidv4 } from 'uuid';
 import { Node, Edge, Provenance } from './models.js';
 import { KSGORM } from './orm/ksg-orm.js';
 
@@ -1019,6 +1020,170 @@ export class KnowShowGo {
         await this.memory.upsert(node, prov, { embeddingRequest: false });
       }
     }
+  }
+
+  // ============================================================================
+  // ASSERTIONS (v0.2.0) - The Spine
+  // ============================================================================
+
+  /**
+   * Create an assertion (truth-bearing claim).
+   * 
+   * KISS: Minimal fields only. Add complexity when needed.
+   * 
+   * @param {Object} params
+   * @param {string} params.subject - Entity UUID this assertion is about
+   * @param {string} params.predicate - Property name (string, not UUID)
+   * @param {*} params.object - Value (string, number, or JSON)
+   * @param {number} [params.truth=1.0] - How true is this? [0,1]
+   * @param {string} [params.source='user'] - Where this came from
+   * @returns {Promise<Object>} Created assertion
+   */
+  async createAssertion({ subject, predicate, object, truth = 1.0, source = 'user' }) {
+    if (!subject) throw new Error('subject is required');
+    if (!predicate) throw new Error('predicate is required');
+    if (object === undefined) throw new Error('object is required');
+    if (typeof truth !== 'number' || truth < 0 || truth > 1) {
+      throw new Error('truth must be a number between 0 and 1');
+    }
+
+    const assertion = {
+      uuid: uuidv4(),
+      subject,
+      predicate,
+      object,
+      truth,
+      source,
+      createdAt: new Date().toISOString()
+    };
+
+    // Store in memory as a special node type
+    const node = new Node({
+      kind: 'assertion',
+      labels: [`assertion:${subject}:${predicate}`],
+      props: assertion,
+      llmEmbedding: null
+    });
+
+    const prov = new Provenance({
+      source: source,
+      ts: assertion.createdAt,
+      confidence: truth,
+      traceId: 'assertion'
+    });
+
+    await this.memory.upsert(node, prov, { embeddingRequest: false });
+    return assertion;
+  }
+
+  /**
+   * Get assertions matching filters.
+   * 
+   * @param {Object} [filters={}]
+   * @param {string} [filters.subject] - Filter by subject UUID
+   * @param {string} [filters.predicate] - Filter by predicate name
+   * @param {*} [filters.object] - Filter by object value
+   * @returns {Promise<Array>} Matching assertions
+   */
+  async getAssertions(filters = {}) {
+    const allNodes = await this._getAllNodes();
+    
+    return allNodes
+      .filter(n => n.kind === 'assertion')
+      .map(n => n.props)
+      .filter(a => {
+        if (filters.subject && a.subject !== filters.subject) return false;
+        if (filters.predicate && a.predicate !== filters.predicate) return false;
+        if (filters.object !== undefined && a.object !== filters.object) return false;
+        return true;
+      });
+  }
+
+  /**
+   * Get all nodes from memory (helper).
+   * @private
+   */
+  async _getAllNodes() {
+    const nodes = this.memory?.nodes;
+    if (!nodes) return [];
+
+    if (nodes instanceof Map) {
+      return Array.from(nodes.values());
+    }
+
+    if (typeof nodes.values === 'function') {
+      const out = nodes.values();
+      return Array.isArray(out) ? out : await out;
+    }
+
+    return [];
+  }
+
+  /**
+   * Get snapshot (resolved values) for an entity.
+   * 
+   * KISS: Highest truth wins. Ties: most recent.
+   * 
+   * @param {string} entityUuid - Entity UUID
+   * @returns {Promise<Object>} Resolved property values
+   */
+  async snapshot(entityUuid) {
+    const assertions = await this.getAssertions({ subject: entityUuid });
+    
+    // Group by predicate
+    const byPredicate = {};
+    for (const a of assertions) {
+      if (!byPredicate[a.predicate]) {
+        byPredicate[a.predicate] = [];
+      }
+      byPredicate[a.predicate].push(a);
+    }
+
+    // Resolve each predicate (highest truth wins, tiebreak by most recent)
+    const snapshot = {};
+    for (const [predicate, predicateAssertions] of Object.entries(byPredicate)) {
+      const winner = this._resolve(predicateAssertions);
+      if (winner) {
+        snapshot[predicate] = winner.object;
+      }
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * Get all evidence (competing assertions) for an entity.
+   * 
+   * @param {string} entityUuid - Entity UUID
+   * @param {string} [predicate] - Optional filter by predicate
+   * @returns {Promise<Array>} All assertions with scores
+   */
+  async evidence(entityUuid, predicate = null) {
+    const filters = { subject: entityUuid };
+    if (predicate) {
+      filters.predicate = predicate;
+    }
+    
+    const assertions = await this.getAssertions(filters);
+    
+    // Sort by score (truth, then recency)
+    return assertions.sort((a, b) => {
+      if (b.truth !== a.truth) return b.truth - a.truth;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+  }
+
+  /**
+   * Simple resolver: highest truth wins, tiebreak by most recent.
+   * @private
+   */
+  _resolve(assertions) {
+    if (!assertions || assertions.length === 0) return null;
+    
+    return assertions.sort((a, b) => {
+      if (b.truth !== a.truth) return b.truth - a.truth;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    })[0];
   }
 }
 
