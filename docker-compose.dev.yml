@@ -1,0 +1,68 @@
+# Development Docker Compose - Hot reload enabled
+# Usage: docker compose -f docker-compose.dev.yml up
+#
+# Features:
+# - Source code mounted as volume (hot reload)
+# - Node --watch mode enabled
+# - Debug logs exposed
+# - ArangoDB with persistent data
+
+version: '3.8'
+
+services:
+  arangodb:
+    image: arangodb:latest
+    container_name: knowshowgo-arango-dev
+    environment:
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD:-devpassword}
+    ports:
+      - "8529:8529"
+    volumes:
+      - arango-data-dev:/var/lib/arangodb3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8529/_api/version"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - knowshowgo-dev
+
+  knowshowgo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: knowshowgo-api-dev
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      KSG_MEMORY_BACKEND: arango
+      ARANGO_URL: http://arangodb:8529
+      ARANGO_DB: knowshowgo_dev
+      ARANGO_USER: root
+      ARANGO_PASS: ${ARANGO_ROOT_PASSWORD:-devpassword}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEBUG: "ksg:*"
+    ports:
+      - "3000:3000"
+      - "9229:9229"  # Node debugger port
+    volumes:
+      # Mount source for hot reload
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./scripts:/app/scripts:ro
+      # Persist logs
+      - ./logs:/app/logs
+    depends_on:
+      arangodb:
+        condition: service_healthy
+    networks:
+      - knowshowgo-dev
+    # Enable Node.js debugging
+    command: ["node", "--watch", "--inspect=0.0.0.0:9229", "src/server/rest-api.js"]
+
+volumes:
+  arango-data-dev:
+
+networks:
+  knowshowgo-dev:
+    driver: bridge

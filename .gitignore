@@ -29,6 +29,9 @@ coverage/
 # Debug logs
 logs/
 
+# Remote config (contains secrets)
+.env.remote
+
 # OS
 Thumbs.db
 

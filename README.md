@@ -148,32 +148,66 @@ Logs are written to `logs/` directory:
 
 ## Development Workflow
 
-### Iterative Development Pattern
-
-1. **Make changes** to code
-2. **Run mock tests** to verify logic: `npm test -- tests/integration/`
-3. **Check daemon logs** if running: `tail -f logs/debug-daemon.log`
-4. **Run live tests** when ready: `TEST_LIVE=true npm test`
-5. **Update docs** after each iteration
-
-### Debugging Tandem Development
-
-When developing KnowShowGo alongside another repo (e.g., `osl-agent-prototype`):
+### Local Development
 
 ```bash
-# Terminal 1: KnowShowGo server
-cd knowshowgo && npm start
+# Start with hot reload
+npm run dev
 
-# Terminal 2: Debug daemon (monitors health + runs tests)
-cd knowshowgo && node scripts/debug-daemon.js --live
-
-# Terminal 3: Your agent repo
-cd osl-agent-prototype && python your_agent.py
+# Or with Docker (hot reload)
+docker compose -f docker-compose.dev.yml up
 ```
 
-Monitor the daemon log for issues:
+### Remote Development (OCI)
+
 ```bash
-tail -f logs/debug-daemon.log
+# 1. Configure remote connection
+cp .env.remote.example .env.remote
+# Edit .env.remote with your OCI VM details
+
+# 2. Check status
+./scripts/remote-dev.sh status
+
+# 3. Deploy changes
+./scripts/remote-dev.sh deploy
+
+# 4. Quick hotfix (commit + push + deploy)
+./scripts/remote-dev.sh hotfix "fix the bug"
+
+# 5. Stream logs
+./scripts/remote-dev.sh logs
+
+# 6. Run tests on remote
+./scripts/remote-dev.sh test
+
+# 7. Rollback if needed
+./scripts/remote-dev.sh rollback
+```
+
+### Remote Watcher (Continuous Monitoring)
+
+```bash
+# Watch remote service health
+./scripts/watch-remote.sh --url http://YOUR_OCI_IP:3000
+
+# Custom interval (10s)
+./scripts/watch-remote.sh --interval 10
+```
+
+### Tandem Development (Local + Remote)
+
+```bash
+# Terminal 1: Watch remote service
+./scripts/watch-remote.sh --url http://YOUR_OCI_IP:3000
+
+# Terminal 2: Stream remote logs
+./scripts/remote-dev.sh logs
+
+# Terminal 3: Local development
+npm run dev
+
+# Terminal 4: Your agent repo (pointing to remote KSG)
+KNOWSHOWGO_URL=http://YOUR_OCI_IP:3000 python your_agent.py
 ```
 
 ## Deployment

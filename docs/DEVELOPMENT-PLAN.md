@@ -708,6 +708,65 @@ tail -f logs/debug-daemon.log
 7. Repeat
 ```
 
+### Remote Development on OCI
+
+**Setup:**
+```bash
+# 1. Configure connection
+cp .env.remote.example .env.remote
+# Edit with your OCI VM details:
+#   OCI_SSH_HOST=123.45.67.89
+#   OCI_SSH_USER=ubuntu
+#   OCI_SSH_KEY=~/.ssh/id_ed25519
+```
+
+**Commands:**
+```bash
+./scripts/remote-dev.sh status      # Check services
+./scripts/remote-dev.sh logs        # Stream API logs
+./scripts/remote-dev.sh logs db     # Stream ArangoDB logs
+./scripts/remote-dev.sh shell       # Shell into container
+./scripts/remote-dev.sh deploy      # Pull & restart
+./scripts/remote-dev.sh hotfix "x"  # Commit + push + deploy
+./scripts/remote-dev.sh test        # Run tests on remote
+./scripts/remote-dev.sh health      # Health check
+./scripts/remote-dev.sh rollback    # Rollback to prev commit
+./scripts/remote-dev.sh ssh         # SSH to server
+```
+
+**Continuous Monitoring:**
+```bash
+# Watch health with alerts
+./scripts/watch-remote.sh --url http://YOUR_IP:3000 --interval 30
+```
+
+**Hotfix Workflow:**
+```bash
+# 1. Make fix locally
+vim src/knowshowgo.js
+
+# 2. Test locally first
+npm test
+
+# 3. Deploy in one command
+./scripts/remote-dev.sh hotfix "fix: resolve XYZ bug"
+
+# 4. Verify
+./scripts/remote-dev.sh health
+```
+
+**Development Docker (Hot Reload):**
+```bash
+# Local development with Docker + hot reload
+docker compose -f docker-compose.dev.yml up
+
+# Includes:
+# - Source mounted as volume
+# - Node --watch mode
+# - Debug port 9229 exposed
+# - Logs persisted to ./logs
+```
+
 ---
 
 ## 13. Version Roadmap
@@ -757,6 +816,6 @@ v1.0.0 (Stable)
 
 ---
 
-*Version 3.2 | 2026-01-14*
+*Version 3.3 | 2026-01-17*
 *Single source of truth for KnowShowGo development*
-*Updated: Debug daemon, agent integration guide, tandem development workflow*
+*Updated: Remote development tools, hotfix workflow, continuous monitoring*

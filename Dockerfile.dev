@@ -1,0 +1,17 @@
+# Development Dockerfile - Hot reload and debugging enabled
+FROM node:20-slim
+
+WORKDIR /app
+
+# Install dependencies first (cached layer)
+COPY package*.json ./
+RUN npm install
+
+# Copy source (will be overridden by volume mount in dev)
+COPY . .
+
+# Expose API and debugger ports
+EXPOSE 3000 9229
+
+# Default command (can be overridden)
+CMD ["node", "--watch", "--inspect=0.0.0.0:9229", "src/server/rest-api.js"]
