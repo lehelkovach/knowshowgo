@@ -1,6 +1,6 @@
 # KnowShowGo Development Plan
 
-**Version:** 4.0  
+**Version:** 4.1  
 **Date:** 2026-01-17  
 **North Star:** KnowShowGo is a semantic memory engine where **Assertions are the only truth-bearing units**, Evidence is auditable, Snapshot is canonical-by-policy, and prototype-theory emerges from exemplar aggregation.
 
@@ -33,6 +33,7 @@
 4. **Everything writes to the spine** — UI, ORM, seeder, procedures, logic graphs all create Assertions
 5. **Backward compatible endpoints** — Preserve existing API shapes while transitioning
 6. **Embeddings are indexes, not truth** — Embeddings help retrieval/clustering; Assertions determine truth
+7. **Start simple, add complexity later** — Simple resolver first, weighted WTA later
 
 ---
 
@@ -61,8 +62,9 @@
 │         │                          │                          │             │
 │         ▼                          ▼                          ▼             │
 │  ┌─────────────┐          ┌─────────────┐          ┌─────────────┐         │
-│  │ Assertions  │          │  WTA        │          │  Claim      │         │
-│  │ (Truth)     │◄────────►│  Resolver   │◄────────►│  Clusters   │         │
+│  │ Assertions  │          │  Resolver   │          │  Claim      │         │
+│  │ (Truth)     │◄────────►│  (Simple→   │◄────────►│  Clusters   │         │
+│  │             │          │   WTA)      │          │             │         │
 │  └─────────────┘          └─────────────┘          └─────────────┘         │
 │         │                          │                          │             │
 │         │                          ▼                          │             │
@@ -136,8 +138,23 @@ interface Provenance {
 }
 ```
 
-### 3.4 WTA Resolver
+### 3.4 Resolver (Staged Complexity)
 
+**v0.2.0: Simple Resolver**
+```typescript
+class SimpleResolver {
+  resolve(assertions: Assertion[]): Assertion {
+    // Highest truth wins, tiebreak by most recent
+    return assertions
+      .sort((a, b) => {
+        if (b.truth !== a.truth) return b.truth - a.truth;
+        return new Date(b.provenance.ts) - new Date(a.provenance.ts);
+      })[0];
+  }
+}
+```
+
+**v0.2.1+: Full WTA Resolver**
 ```typescript
 const DEFAULT_POLICY = {
   weights: {
@@ -151,7 +168,8 @@ const DEFAULT_POLICY = {
 };
 
 class WTAResolver {
-  scoreAssertion(a: Assertion): number {
+  scoreAssertion(a: Assertion, policy = DEFAULT_POLICY): number {
+    const { weights } = policy;
     return (
       a.truth * weights.truth +
       normalize(a.voteScore) * weights.voteScore +
@@ -161,7 +179,7 @@ class WTAResolver {
     );
   }
   
-  resolve(assertions: Assertion[]): {
+  resolve(assertions: Assertion[], policy?): {
     winner: Assertion;
     snapshot: Record<string, any>;
     evidence: Assertion[];
@@ -169,6 +187,38 @@ class WTAResolver {
   }
 }
 ```
+
+### 3.5 Hybrid Property Mode
+
+**Not everything needs to be an assertion.** Use this heuristic:
+
+| Property Type | Storage | When |
+|---------------|---------|------|
+| **Simple/Internal** | `jsonObj` (fast path) | IDs, timestamps, system fields |
+| **Contested/Auditable** | Assertion | User-facing, may have conflicts |
+| **Derived** | Snapshot cache | Computed from assertions |
+
+```javascript
+// Simple property (no assertion needed)
+await entity.setProperty('internalId', '12345');  // → jsonObj only
+
+// Auditable property (assertion)
+await entity.assert('hasAge', 40, { truth: 0.9 }); // → creates assertion
+
+// Reading always checks snapshot first
+const snapshot = await entity.snapshot();
+```
+
+### 3.6 jsonObj Transition Path
+
+**Backward compatibility preserved:**
+
+| Version | Write Behavior | Read Behavior |
+|---------|----------------|---------------|
+| v0.1.x (current) | jsonObj stored directly | jsonObj returned |
+| v0.2.0 | jsonObj + assertions created | jsonObj returned (compat) |
+| v0.3.0 | jsonObj + assertions | Snapshot derived from assertions |
+| v1.0.0 | jsonObj is write-only convenience | Snapshot always |
 
 ---
 
@@ -192,7 +242,7 @@ interface ClaimCluster {
   id: string;
   canonicalAssertionId?: string;  // Merged winner
   memberIds: string[];            // All assertions in cluster
-  centroidEmbedding: number[];    // Mean embedding
+  centroidEmbedding: number[];    // Mean embedding (incremental)
   mergePolicy: 'auto' | 'manual' | 'voting';
   state: {
     needsReview: boolean;
@@ -222,9 +272,21 @@ interface ClaimCluster {
 
 ## 5. NeuroSym Logic Engine
 
-### 5.1 NeuroJSON Schema
+### 5.1 Loose Coupling Design
 
-Logic represented as computable DAG:
+NeuroSym is a **standalone engine** that CAN integrate with assertions but doesn't require it:
+
+```javascript
+// Mode A: Ephemeral (no persistence)
+import { NeuroEngine } from 'neurosym';
+const result = engine.run(schema, evidence);  // Pure computation
+
+// Mode B: Persistent (backed by KSG assertions)
+const result = await ksg.neuro.solveAndPersist(contextId, evidence);
+// Reads/writes assertions for propositions and rules
+```
+
+### 5.2 NeuroJSON Schema
 
 ```typescript
 interface NeuroJSON {
@@ -238,6 +300,7 @@ interface Variable {
   type: 'bool' | 'continuous';
   prior: TruthValue;
   locked?: boolean;
+  assertionId?: string;  // Optional: link to KSG assertion
 }
 
 interface Rule {
@@ -248,6 +311,7 @@ interface Rule {
   op: 'IDENTITY' | 'AND' | 'OR' | 'NOT' | 'WEIGHTED';
   weight: TruthValue;
   learnable?: boolean;
+  assertionId?: string;  // Optional: link to KSG assertion
 }
 
 interface Constraint {
@@ -259,7 +323,7 @@ interface Constraint {
 }
 ```
 
-### 5.2 Logic Operations (Lukasiewicz T-Norms)
+### 5.3 Logic Operations (Lukasiewicz T-Norms)
 
 | Operation | Formula | Use |
 |-----------|---------|-----|
@@ -270,12 +334,10 @@ interface Constraint {
 | ATTACK | `target × (1 - attacker × weight)` | Inhibition |
 | SUPPORT | `target + (1-target) × src × weight` | Reinforcement |
 
-### 5.3 Integration with Assertions
-
-NeuroDAG nodes are backed by Assertions:
+### 5.4 Optional Integration with Assertions
 
 ```typescript
-// A proposition becomes an Assertion
+// Only when persistence is needed
 const prop = await ksg.createAssertion({
   subject: 'context:risk_model',
   predicate: 'hasProposition',
@@ -284,14 +346,16 @@ const prop = await ksg.createAssertion({
   provenance: { method: 'observation' }
 });
 
-// Rules are also Assertions
-const rule = await ksg.createAssertion({
-  subject: 'prop:server_down',
-  predicate: 'implies',
-  object: 'prop:churn_risk',
-  truth: 0.9,  // Rule weight
-  provenance: { method: 'manual' }
-});
+// NeuroJSON can reference it
+const schema = {
+  variables: {
+    'server_down': { 
+      type: 'bool', 
+      prior: 1.0,
+      assertionId: prop.uuid  // Optional link
+    }
+  }
+};
 ```
 
 ---
@@ -300,53 +364,37 @@ const rule = await ksg.createAssertion({
 
 ### Stage 1: Assertion Spine (v0.2.0) 🔴 CRITICAL
 
-**Priority: Enables everything else**
+**Priority: Enables everything else. Start SIMPLE.**
 
 | Task | Status | Deliverable |
 |------|--------|-------------|
 | Assertion model | ❌ | `src/models/assertion.js` |
 | Assertion CRUD | ❌ | `createAssertion`, `getAssertions`, `vote` |
-| WTA Resolver | ❌ | `src/resolution/wta-resolver.js` |
+| **Simple Resolver** | ❌ | Highest truth wins, recency tiebreak |
 | Snapshot endpoint | ❌ | `GET /api/entities/:id/snapshot` |
 | Evidence endpoint | ❌ | `GET /api/entities/:id/evidence` |
-| Explain endpoint | ❌ | `GET /api/entities/:id/explain` |
-| createConcept → Assertions | ❌ | Expand jsonObj into assertions |
-| Tests | ❌ | 20+ new tests |
+| createConcept → dual write | ❌ | jsonObj + assertions (compat) |
+| Tests | ❌ | 15+ new tests |
 
-**Acceptance:** Assertions can be created, queried, voted on. Snapshot derives from WTA.
+**Acceptance:** Assertions work. Snapshot returns winner. Existing API unchanged.
 
-### Stage 2: Procedures as DAGs (v0.2.1) 🔴 CRITICAL FOR AGENT
+### Stage 2: Procedures + Full WTA (v0.2.1) 🔴 CRITICAL FOR AGENT
 
-**Priority: Agent memory for workflows**
+**Priority: Agent memory for workflows + configurable resolution**
 
 | Task | Status | Deliverable |
 |------|--------|-------------|
-| Procedure as Entity Type | ✅ | Seeded via osl-agent |
-| Step as Entity Type | ✅ | Seeded |
+| Full WTA Resolver | ❌ | Configurable weights |
+| Explain endpoint | ❌ | `GET /api/entities/:id/explain` |
 | Step ordering via Assertions | ❌ | `next`, `order` predicates |
 | Step semantics | ❌ | `does`, `usesSelector`, `expects` |
 | Procedure retrieval | ❌ | `GET /api/procedures/:id` → DAG JSON |
-| Procedure search | ✅ | `POST /api/procedures/search` |
 
-**Acceptance:** Agent can store learned workflow and retrieve by semantic search.
+**Acceptance:** Agent can store/retrieve workflows. WTA explains decisions.
 
-### Stage 3: Claim Deduplication (v0.2.2) 🟡 HIGH
+### Stage 3: WorkingMemoryGraph (v0.2.2) 🟡 HIGH
 
-**Priority: Multiple sources reporting same thing**
-
-| Task | Status | Deliverable |
-|------|--------|-------------|
-| ClaimCluster model | ❌ | `src/models/claim-cluster.js` |
-| Duplicate detection | ❌ | On assertion create, find similar |
-| Cluster CRUD | ❌ | `POST /api/clusters`, `GET /api/clusters/:id` |
-| Merge endpoint | ❌ | `POST /api/claims/merge` |
-| Auto-merge policy | ❌ | Configurable threshold |
-
-**Acceptance:** Duplicate claims are detected and can be merged.
-
-### Stage 4: WorkingMemoryGraph (v0.2.3) 🟡 HIGH
-
-**Priority: Agent session state**
+**Priority: Agent session state (swapped with dedup - agent needs this first)**
 
 | Task | Status | Deliverable |
 |------|--------|-------------|
@@ -357,42 +405,58 @@ const rule = await ksg.createAssertion({
 
 **Acceptance:** Agents can use WMG for session-scoped activation.
 
+### Stage 4: Claim Deduplication (v0.2.3) 🟡 HIGH
+
+**Priority: Multiple sources reporting same thing**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| ClaimCluster model | ❌ | `src/models/claim-cluster.js` |
+| Duplicate detection | ❌ | On assertion create, find similar |
+| Incremental centroid | ❌ | `(old * n + new) / (n + 1)` |
+| Cluster CRUD | ❌ | `POST /api/clusters`, `GET /api/clusters/:id` |
+| Merge endpoint | ❌ | `POST /api/claims/merge` |
+
+**Acceptance:** Duplicate claims detected and can be merged.
+
 ### Stage 5: NeuroSym Engine (v0.3.0) 🟡 HIGH
 
-**Priority: Logic/reasoning capability**
+**Priority: Logic/reasoning capability (loosely coupled)**
 
 | Task | Status | Deliverable |
 |------|--------|-------------|
 | Port types.ts | ❌ | `src/neuro/types.js` |
 | Port logic-core.ts | ❌ | `src/neuro/logic-core.js` |
 | Port engine.ts | ❌ | `src/neuro/engine.js` |
+| Standalone mode | ❌ | Works without KSG |
 | REST endpoint | ❌ | `POST /api/neuro/solve` |
-| Integration with Assertions | ❌ | NeuroDAG nodes are Assertions |
+| Optional assertion backing | ❌ | `solveAndPersist` |
 
-**Acceptance:** Can define logic graph and run inference.
+**Acceptance:** Can run inference standalone or with KSG persistence.
 
-### Stage 6: Prototype Theory (v0.3.1) 🟢 MEDIUM
+### Stage 6: Centroid Embeddings (v0.3.1) 🟢 MEDIUM
 
-**Priority: Dynamic schemas, UI scaffolding**
-
-| Task | Status | Deliverable |
-|------|--------|-------------|
-| Type.centroid | ❌ | Weighted centroid of exemplars |
-| addExemplar | ❌ | Add instance to type |
-| recomputeCentroid | ❌ | Update on exemplar change |
-| Feature template | ❌ | Aggregate predicates from exemplars |
-| recomputeTemplate | ❌ | Derive recommended predicates |
-
-**Acceptance:** Types have computed centroids and feature templates.
-
-### Stage 7: Arango Parity (v0.4.0) 🟢 MEDIUM
-
-**Priority: Production persistence**
+**Priority: Prototype theory - centroids only first**
 
 | Task | Status | Deliverable |
 |------|--------|-------------|
-| Assertion storage | ❌ | Arango collection |
-| Cluster storage | ❌ | Arango collection |
+| Type.centroid field | ❌ | Stored on type entity |
+| addExemplar | ❌ | Incremental centroid update |
+| Incremental formula | ❌ | `newCentroid = (old * n + new) / (n + 1)` |
+| getCentroid | ❌ | Returns current centroid |
+
+**Acceptance:** Types have computed centroids via incremental updates.
+
+### Stage 7: Feature Templates + Arango (v0.4.0) 🟢 MEDIUM
+
+**Priority: Production persistence + dynamic schemas**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| Feature template aggregation | ❌ | Derive predicates from exemplars |
+| recomputeTemplate | ❌ | Aggregate on demand |
+| Assertion storage (Arango) | ❌ | Collection + indexes |
+| Cluster storage (Arango) | ❌ | Collection |
 | Snapshot AQL | ❌ | Efficient WTA query |
 | Live tests | ❌ | `TEST_LIVE=true` passing |
 
@@ -423,25 +487,28 @@ GET  /api/orm/:proto/:uuid
 ### 7.2 New Endpoints (v0.2.0+) ❌
 
 ```
-# Assertions
+# Assertions (v0.2.0)
 POST /api/assertions              # Create assertion
 GET  /api/assertions              # Query (filter by subject/predicate/object)
 POST /api/assertions/:id/vote     # Vote on assertion
 GET  /api/assertions/:id/lineage  # Edit history
 
-# Snapshot/Evidence
-GET  /api/entities/:id/snapshot   # Canonical values (WTA winners)
+# Snapshot/Evidence (v0.2.0)
+GET  /api/entities/:id/snapshot   # Canonical values (resolver winners)
 GET  /api/entities/:id/evidence   # All competing assertions
+
+# Explain (v0.2.1)
 GET  /api/entities/:id/explain    # Why value X won
 
-# Claims/Deduplication
+# Claims/Deduplication (v0.2.3)
 POST /api/claims/similar          # Find similar claims
 GET  /api/clusters/:id            # Get cluster with members
 POST /api/claims/merge            # Merge claims into canonical
 POST /api/claims/:id/promote      # Promote to verified fact
 
-# NeuroSym
-POST /api/neuro/solve             # Run inference on logic graph
+# NeuroSym (v0.3.0)
+POST /api/neuro/solve             # Run inference (standalone)
+POST /api/neuro/solve-persist     # Run + write assertions
 POST /api/neuro/transpile         # Convert to natural language
 ```
 
@@ -454,9 +521,11 @@ POST /api/neuro/transpile         # Convert to natural language
 ```javascript
 const bob = ksg.entity('uuid-bob');
 
-// Write via Assertions
+// Write via Assertions (auditable)
 await bob.assert('hasAge', 40, { truth: 0.95, source: 'user' });
-await bob.assert('worksAt', companyId, { strength: 0.8 });
+
+// Write simple property (fast path, not auditable)
+await bob.setProperty('lastSeen', new Date().toISOString());
 
 // Read via Snapshot (derived)
 const snapshot = await bob.snapshot();
@@ -502,8 +571,11 @@ const snapshot = await client.snapshot(entityId);
 // Search
 const results = await client.search('person named John', { topK: 5 });
 
-// NeuroSym
-const result = await client.solve(neuroJSON, { 'fact_a': 1.0 });
+// NeuroSym (standalone)
+const result = await client.neuroSolve(schema, evidence);
+
+// NeuroSym (persistent)
+const result = await client.neuroSolvePersist(contextId, evidence);
 ```
 
 ---
@@ -638,21 +710,34 @@ TEST_LIVE=true npm test               # With ArangoDB
 
 ### v0.2.0 (Assertion Spine) ✅ when:
 - [ ] Assertion CRUD + voting shipped
-- [ ] Snapshot/evidence/explain endpoints working
-- [ ] createConcept expands jsonObj into assertions
-- [ ] Procedures storable/retrievable by search
-- [ ] 20+ new tests passing
+- [ ] Simple resolver (highest truth wins)
+- [ ] Snapshot/evidence endpoints working
+- [ ] createConcept dual-writes (jsonObj + assertions)
+- [ ] Existing API unchanged (backward compat)
+- [ ] 15+ new tests passing
 
-### v0.2.2 (Deduplication) ✅ when:
+### v0.2.1 (Procedures + WTA) ✅ when:
+- [ ] Full WTA with configurable weights
+- [ ] Explain endpoint shows score breakdown
+- [ ] Procedures storable/retrievable by search
+- [ ] 10+ new tests passing
+
+### v0.2.2 (WorkingMemoryGraph) ✅ when:
+- [ ] WMG class exported and usable by agents
+- [ ] Hebbian link/access/decay working
+- [ ] Session save/restore optional
+- [ ] 5+ tests passing
+
+### v0.2.3 (Deduplication) ✅ when:
 - [ ] Duplicate detection on assertion create
-- [ ] Cluster CRUD endpoints
-- [ ] Merge endpoint working
-- [ ] Auto-merge with configurable threshold
+- [ ] Incremental centroid updates
+- [ ] Cluster CRUD + merge endpoints
+- [ ] 10+ tests passing
 
 ### v0.3.0 (NeuroSym) ✅ when:
-- [ ] Logic engine ported from TypeScript
+- [ ] Engine works standalone (no KSG required)
 - [ ] `/api/neuro/solve` endpoint
-- [ ] NeuroDAG nodes backed by Assertions
+- [ ] Optional assertion backing via `solve-persist`
 - [ ] 50+ logic tests passing
 
 ### v1.0.0 (Production) ✅ when:
@@ -670,10 +755,22 @@ TEST_LIVE=true npm test               # With ArangoDB
 3. **Provenance on everything** — Every assertion has source, method, timestamp
 4. **Backward compatible** — Existing endpoints continue to work
 5. **Embeddings are indexes** — Help retrieval, don't determine truth
-6. **Finish the spine first** — Everything else becomes easy after Assertions + Resolver
+6. **Start simple** — Simple resolver first, weighted WTA in v0.2.1
+7. **Loose coupling** — NeuroSym works standalone, KSG integration optional
+8. **Finish the spine first** — Everything else becomes easy after Assertions + Resolver
 
 ---
 
-*Version 4.0 | 2026-01-17*
-*Unified plan: Assertions + Claims/Dedup + NeuroSym + Prototype Theory*
-*Priority: osl-agent-prototype functionality first*
+## Summary of v4.1 Refinements
+
+1. **Simplified v0.2.0 WTA** → Simple resolver (highest truth wins), full WTA in v0.2.1
+2. **Swapped v0.2.2 and v0.2.3** → WorkingMemoryGraph before Deduplication (agent needs it first)
+3. **NeuroSym loose coupling** → Works standalone, KSG integration optional
+4. **Hybrid property mode** → Not everything needs to be an assertion
+5. **Incremental centroids** → `(old * n + new) / (n + 1)` to avoid O(n) recomputation
+6. **jsonObj transition path** → Backward compat: dual-write now, snapshot-only later
+
+---
+
+*Version 4.1 | 2026-01-17*
+*Refined: Simpler start, agent-first priorities, loose coupling*
