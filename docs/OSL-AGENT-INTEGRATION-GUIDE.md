@@ -6,7 +6,22 @@
 
 ---
 
-## 0. IMPORTANT: Existing Work in osl-agent-prototype Branches
+## 0. HANDOFF DOCUMENT (Latest)
+
+**See:** `https://github.com/lehelkovach/osl-agent-prototype/blob/main/docs/KNOWSHOWGO-SERVICE-HANDOFF.md`
+
+This handoff doc contains:
+- Full API specs for the service
+- Pydantic models
+- Python client implementation
+- **NEW v0.2.0:** Pattern Evolution (transfer/generalize)
+- **NEW v0.2.0:** Centroid-Based Embedding Evolution
+- **NEW v0.2.0:** First-Class Edges (relationships as searchable nodes)
+- 83+ tests
+
+---
+
+## 0.1 Existing Work in osl-agent-prototype Branches
 
 **The integration work is already partially complete** in osl-agent-prototype branches:
 

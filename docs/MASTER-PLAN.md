@@ -356,13 +356,14 @@ v0.1.0 (Current)
 ├── ORM (prototype-based)
 └── 54 tests, 74.57% coverage
 
-v0.2.0 (MVP)
+v0.2.0 (MVP + osl-agent-prototype parity)
 ├── Assertion model
 ├── WorkingMemoryGraph
 ├── WTA Resolution
 ├── Snapshot/Evidence API
-├── EntityFacade ORM
-└── AsyncReplicator
+├── Pattern Evolution (transfer, generalize)
+├── Centroid-Based Embeddings
+└── First-Class Edges (relationships as nodes)
 
 v0.3.0 (NeuroDAG)
 ├── NeuroDAG methods (createProposition, createRule, createDAG)
@@ -370,31 +371,91 @@ v0.3.0 (NeuroDAG)
 ├── ResolutionPolicy as Entity
 └── Python SDK sync
 
-v0.4.0 (GraphRAG Phase 1)
-├── Fact embeddings (assertion as sentence)
-├── /api/search/facts endpoint
-├── Triple text generation
-
-v0.5.0 (GraphRAG Phase 2)
-├── Hybrid search (vector → graph traversal)
-├── NeuroSym reasoning integration
+v0.4.0 (GraphRAG)
+├── Fact embeddings
+├── Hybrid search (vector → graph)
 ├── /api/graphrag/query endpoint
-
-v0.6.0 (Link Prediction)
-├── TransE predicate embeddings
-├── /api/predict/link endpoint
-├── /api/predict/predicate endpoint
+├── TransE link prediction
 
 v1.0.0 (Stable)
 ├── Full documentation
 ├── npm publish
-├── osl-agent-prototype integration
-└── Production deployment
+├── Production deployment
 ```
 
 ---
 
-## 12. GraphRAG & Advanced Embeddings (Post-MVP)
+## 12. Pattern Evolution & Centroid Embeddings (v0.2.0)
+
+**Source:** `osl-agent-prototype` handoff doc
+
+### Pattern Evolution (Learn → Transfer → Generalize)
+
+```javascript
+// Find similar patterns for transfer
+const similar = await ksg.findSimilarPatterns("checkout form", { minSimilarity: 0.6 });
+
+// Transfer pattern to new context (with optional LLM field mapping)
+const result = await ksg.transferPattern(sourceUuid, targetContext, llmFn);
+
+// Record success and auto-generalize
+await ksg.recordPatternSuccess(patternUuid, context);
+await ksg.autoGeneralize(patternUuid, { minSimilar: 2 });
+
+// Prefer proven generalized patterns
+const best = await ksg.findGeneralizedPattern("login form");
+```
+
+### Centroid-Based Embedding Evolution
+
+Concept embeddings evolve toward exemplar centroids:
+
+```javascript
+// Add exemplar, embedding auto-updates toward centroid
+await ksg.addExemplar(conceptUuid, exemplarEmbedding);
+await ksg.addExemplar(conceptUuid, anotherEmbedding);
+
+// Get current centroid
+const centroid = await ksg.getConceptCentroid(conceptUuid);
+
+// Force recompute from all linked exemplars
+await ksg.recomputeCentroid(conceptUuid);
+```
+
+### First-Class Edges (Relationships as Nodes)
+
+Relationships are searchable nodes with embeddings:
+
+```javascript
+// Create searchable relationship
+await ksg.createRelationship({
+  fromUuid: loginFormUuid,
+  toUuid: authServiceUuid,
+  relType: "requires",
+  properties: { strength: 0.9 },
+  embedding: await embedFn("authentication dependency")
+});
+
+// Search relationships by similarity
+const results = await ksg.searchRelationships("authentication dependency");
+```
+
+### New API Endpoints (v0.2.0)
+
+```
+POST /api/patterns/similar          # Find similar patterns
+POST /api/patterns/transfer         # Transfer pattern to new context
+POST /api/patterns/:id/success      # Record pattern success
+POST /api/patterns/:id/generalize   # Auto-generalize pattern
+POST /api/relationships             # Create searchable relationship
+POST /api/relationships/search      # Search relationships
+POST /api/concepts/:id/exemplar     # Add exemplar to concept
+GET  /api/concepts/:id/centroid     # Get concept centroid
+```
+
+---
+
+## 13. GraphRAG & Advanced Embeddings (v0.4.0+)
 
 ### Three Embedding Levels
 
@@ -433,7 +494,7 @@ POST /api/graphrag/query        # Full hybrid RAG query
 
 ---
 
-## 13. ORM Refactoring Details
+## 14. ORM Refactoring Details
 
 ### EntityFacade Pattern
 
@@ -502,7 +563,7 @@ const results = await neuro.solve();
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Create Assertion
 ```javascript
