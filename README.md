@@ -1,181 +1,216 @@
-# KnowShowGo - JavaScript/Node.js Implementation
+# KnowShowGo
 
-A fuzzy ontology knowledge graph for semantic memory, designed for AI agents and learning systems.
-
-## Overview
-
-KnowShowGo (KSG) is a prototype-based knowledge graph that combines:
-- **Fuzzy matching** via vector embeddings (semantic similarity)
-- **Prototype-based OOP** (JavaScript-style inheritance)
-- **Versioned concepts** with immutable history
-- **Weighted associations** for relationship strength
-- **ORM-style API** for object hydration
-
-## Features
-
-- ✅ Prototype and concept creation
-- ✅ Semantic search via embeddings
-- ✅ Versioned updates (immutable history)
-- ✅ Associations with weights and provenance
-- ✅ ORM-style object hydration (planned)
-- ✅ Recursive concept creation (planned)
-- ✅ Query-time generalization (planned)
-- ✅ Schema generalization (planned)
-
-## Installation
-
-```bash
-npm install
-```
-
-## Quick Start - REST API
-
-```bash
-# Start API server (in-memory backend)
-npm start
-
-# Or with ArangoDB
-KSG_MEMORY_BACKEND=arango npm start
-```
-
-The API will be available at `http://localhost:3000`
-
-## OSL Agent Prototype Integration (seed + procedure endpoints)
-
-This repo now includes an **idempotent seed** intended to provide the minimal ontology/prototypes used by `osl-agent-prototype` (e.g. `Procedure`, `Step`, `Task`, `QueueItem`, etc.).
-
-```bash
-# seed the ontology into your configured backend (in-memory or Arango)
-npm run seed:osl-agent
-```
-
-Compatibility endpoints:
-- `POST /api/seed/osl-agent`
-- `POST /api/procedures` (create Procedure + Steps + DAG deps)
-- `POST /api/procedures/search`
-
-## Quick Start - Web UI (Create Knode)
-
-Start the server, then open:
-
-- `http://localhost:3000/ui/`
-
-## Quick Start - Docker
-
-```bash
-# Start ArangoDB and API server
-docker-compose up -d
-
-# Check status
-docker-compose ps
-
-# View logs
-docker-compose logs -f knowshowgo-api
-```
+A semantic memory engine for AI agents — fuzzy ontology knowledge graph with prototype-based OOP.
 
 ## Quick Start
 
-```javascript
-import { KnowShowGo, InMemoryMemory } from './src/index.js';
+```bash
+# Install
+npm install
 
-// Initialize with embedding function
+# Run tests
+npm test
+
+# Start server
+npm start
+
+# Health check
+curl http://localhost:3000/health
+```
+
+## What is KnowShowGo?
+
+KnowShowGo is a knowledge graph that combines:
+- **Fuzzy matching** via vector embeddings
+- **Prototype-based OOP** (JavaScript-style inheritance)
+- **Lazy-loading ORM** with dynamic properties
+- **Assertions** with truth values and provenance
+- **WTA Resolution** for canonical snapshots
+
+## Features
+
+| Feature | Status |
+|---------|--------|
+| Prototypes & Concepts | ✅ |
+| Semantic Search | ✅ |
+| Associations with Weights | ✅ |
+| ORM with Lazy Loading | ✅ |
+| REST API (17 endpoints) | ✅ |
+| In-Memory Backend | ✅ |
+| ArangoDB Backend | ✅ |
+| Docker Deployment | ✅ |
+| Assertions & WTA | ❌ Planned |
+| Pattern Evolution | ❌ Planned |
+| NeuroDAG Fuzzy Logic | ❌ Planned |
+
+## Usage
+
+### JavaScript API
+
+```javascript
+import { KnowShowGo, InMemoryMemory } from 'knowshowgo';
+
 const ksg = new KnowShowGo({
-  embedFn: async (text) => {
-    // Use your embedding service (OpenAI, local, etc.)
-    return await yourEmbeddingService(text);
-  },
-  memory: new InMemoryMemory() // or ArangoMemory, ChromaMemory, etc.
+  embedFn: async (text) => yourEmbeddingService(text),
+  memory: new InMemoryMemory()
 });
 
-// Create a prototype
+// Create prototype
 const personProto = await ksg.createPrototype({
   name: 'Person',
   description: 'A human individual',
-  context: 'identity',
-  labels: ['person', 'human'],
-  embedding: await embed('Person human individual')
+  embedding: await ksg.embedFn('Person human')
 });
 
-// Create a concept
+// Create concept
 const john = await ksg.createConcept({
   prototypeUuid: personProto,
-  jsonObj: {
-    name: 'John Doe',
-    email: 'john@example.com',
-    age: 30
-  },
-  embedding: await embed('John Doe person')
+  jsonObj: { name: 'John Doe', age: 30 },
+  embedding: await ksg.embedFn('John Doe person')
 });
 
-// Search for similar concepts
+// Search
 const results = await ksg.searchConcepts({
   query: 'person named John',
-  topK: 5,
-  similarityThreshold: 0.7
+  topK: 5
+});
+```
+
+### ORM with Lazy Loading
+
+```javascript
+// Register prototype - creates dynamic JS class
+const Person = await ksg.orm.registerPrototype('Person', {
+  properties: {
+    name: { type: 'string', required: true },
+    email: { type: 'string' },
+    age: { type: 'number' }
+  }
 });
 
-// Get concept
-const concept = await ksg.getConcept(john);
-console.log(concept); // { uuid: '...', props: { name: 'John Doe', ... } }
+// Create instance
+const john = await Person.create({
+  name: 'John Doe',
+  email: 'john@example.com',
+  age: 30
+});
+
+// Get instance - lazy loads properties
+const person = await Person.get(john.uuid);
+const name = await person._getProperty('name');
+
+// Find all
+const people = await Person.find();
 ```
 
-## Architecture
+### REST API
 
+```bash
+# Create prototype
+curl -X POST http://localhost:3000/api/prototypes \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Person", "description": "A human"}'
+
+# Create concept
+curl -X POST http://localhost:3000/api/concepts \
+  -H "Content-Type: application/json" \
+  -d '{"prototypeUuid": "...", "jsonObj": {"name": "John"}}'
+
+# Search
+curl -X POST http://localhost:3000/api/concepts/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "person", "topK": 5}'
 ```
-KnowShowGo API
-  ↓
-Memory Backend (ArangoDB/ChromaDB/InMemory)
-  ↓
-Embedding Service (OpenAI/Local/etc.)
-```
-
-## Design Principles
-
-1. **Everything is a Topic**: Concepts, prototypes, properties, values
-2. **Prototypes are Immutable**: Schema changes create new versions
-3. **Concepts are Versioned**: Significant changes create new versions
-4. **Fuzzy Matching**: Embedding-based similarity, not exact matches
-5. **ORM-Style**: Automatic object hydration from prototypes (planned)
-
-## Documentation
-
-- [Handoff Document](./HANDOFF.md) - **Start here** - Complete extraction and deployment guide
-- [Oracle Cloud Deployment](./docs/DEPLOYMENT-OCI.md)
-- [OSL Agent Prototype Integration](./docs/OSL-AGENT-PROTOTYPE-INTEGRATION.md)
-- [API Reference](./docs/API.md) - Full API documentation
-- [REST API](./src/server/rest-api.js) - REST API server implementation
-- [Python Client](./api/python/client.py) - Python REST API client
-- [System Design](./docs/Knowshowgo_SYSTEM_DESIGN_v0.1.md) - Original system design
-- [Refined Architecture](./docs/REFINED-ARCHITECTURE.md) - Current architecture with documents and mean embeddings
-- [Architecture](./docs/knowshowgo-ontology-architecture.md) - Architecture details
-- [Versioning Strategy](./docs/knowshowgo-versioning-strategy.md) - Versioning approach
-- [Test Coverage](./docs/TEST-COVERAGE.md) - Test migration guide
-- [Reference Implementation](./reference/README.md) - Python reference code
 
 ## Testing
 
 ```bash
+# Run all tests (54 tests, 74% coverage)
 npm test
-npm run test:coverage
-npm run test:watch
+
+# With coverage report
+npm test -- --coverage
+
+# Run specific test file
+npm test -- tests/rest-api.test.js
+
+# Run integration tests (mock)
+npm test -- tests/integration/
+
+# Run integration tests (live - requires ArangoDB)
+TEST_LIVE=true npm test -- tests/integration/
 ```
 
-## Repository Setup
+## Deployment
 
-See [REPOSITORY-SETUP.md](./REPOSITORY-SETUP.md) for instructions on setting up this as a separate GitHub repository.
+### Docker
+
+```bash
+docker compose up -d
+curl http://localhost:3000/health
+```
+
+### Oracle Cloud
+
+See deployment instructions in [DEVELOPMENT-PLAN.md](./docs/DEVELOPMENT-PLAN.md#10-deployment-oracle-cloud).
+
+## Documentation
+
+**Single source of truth:** [`docs/DEVELOPMENT-PLAN.md`](./docs/DEVELOPMENT-PLAN.md)
+
+Contains:
+- Core & cognitive primitives
+- REST API reference
+- JavaScript API reference
+- ORM patterns
+- Test coverage
+- Deployment guide
+- osl-agent-prototype integration
+- Version roadmap
+
+## Integration with osl-agent-prototype
+
+```bash
+# Seed the ontology
+curl -X POST http://localhost:3000/api/seed/osl-agent
+
+# Use from Python
+from knowshowgo_client import KnowShowGoClient
+client = KnowShowGoClient("http://localhost:3000")
+```
+
+See [DEVELOPMENT-PLAN.md#11](./docs/DEVELOPMENT-PLAN.md#11-osl-agent-prototype-integration) for full integration guide.
+
+## Project Structure
+
+```
+knowshowgo/
+├── src/
+│   ├── knowshowgo.js      # Core API
+│   ├── models.js          # Node, Edge, Provenance
+│   ├── memory/            # In-memory, ArangoDB backends
+│   ├── orm/               # ORM with lazy loading
+│   └── server/            # REST API
+├── tests/
+│   ├── *.test.js          # Unit tests
+│   └── integration/       # E2E tests (mock + live)
+├── docs/
+│   └── DEVELOPMENT-PLAN.md  # Single documentation file
+├── api/
+│   └── python/            # Python client
+└── docker-compose.yml
+```
+
+## Status
+
+**v0.1.0** - 54 tests passing, 74.57% coverage
+
+**Next (v0.2.0):**
+- Assertions with truth/strength
+- WTA Resolution
+- Pattern Evolution
+- Centroid Embeddings
 
 ## License
 
 MIT
-
-## Status
-
-**Current**: Core implementation complete, ready for extraction to separate repo.
-
-**Planned**:
-- Query-time generalization
-- Schema generalization
-- Layered weighting system
-- Advanced versioning
-- Memory backend implementations (ArangoDB, ChromaDB)
-- ORM features (object hydration, recursive creation)

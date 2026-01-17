@@ -32,7 +32,7 @@ KnowShowGo is a semantic memory engine for AI agents, providing:
 - **Fuzzy Logic** — NeuroDAG propositions with WTA resolution
 - **Dual Views** — Evidence (auditable) vs Snapshot (canonical)
 
-**Current Status:** 54 tests passing | 74.57% line coverage
+**Current Status:** 93 tests passing (54 unit + 39 integration)
 
 ---
 
@@ -298,7 +298,12 @@ const results = await neuro.solve();
 
 ## 9. Test Coverage
 
-**Total: 54 tests | 7 suites | 74.57% line coverage**
+**Total: 93 tests | 10 suites**
+
+| Suite | Tests | Description |
+|-------|-------|-------------|
+| Unit Tests | 54 | Core functionality |
+| Integration Tests | 39 | E2E & API tests |
 
 | File | Lines |
 |------|-------|
@@ -309,12 +314,59 @@ const results = await neuro.solve();
 | `src/server/rest-api.js` | 75% |
 | `src/memory/arango-memory.js` | 0% |
 
+### Test Structure
+
+```
+tests/
+├── knowshowgo.test.js         # Core API tests
+├── orm.test.js                # ORM unit tests
+├── rest-api.test.js           # REST API tests
+├── assertion.test.js          # Assertion model tests
+├── multiple-inheritance.test.js
+├── fully-unified-architecture.test.js
+├── refined-architecture.test.js
+└── integration/
+    ├── setup.js               # Test helpers & fixtures
+    ├── api.integration.test.js    # API integration tests
+    ├── orm.integration.test.js    # ORM integration tests
+    └── e2e-workflow.integration.test.js  # E2E workflow tests
+```
+
 ### Run Tests
 
 ```bash
-npm test                    # Run all
-npm test -- --coverage      # With coverage
-npm test -- tests/rest-api.test.js  # Specific file
+# Run all tests (93 tests)
+npm test
+
+# With coverage report
+npm test -- --coverage
+
+# Run specific test file
+npm test -- tests/rest-api.test.js
+
+# Run integration tests only (mock mode)
+npm test -- tests/integration/
+
+# Run integration tests with live ArangoDB
+TEST_LIVE=true npm test -- tests/integration/
+```
+
+### Mock vs Live Mode
+
+Integration tests support both mock and live connection modes:
+
+| Mode | Environment | Backend |
+|------|-------------|---------|
+| **Mock** (default) | `TEST_LIVE=false` | In-memory |
+| **Live** | `TEST_LIVE=true` | ArangoDB |
+
+For live mode, configure these environment variables:
+
+```bash
+export ARANGO_URL=http://localhost:8529
+export ARANGO_DB=knowshowgo_test
+export ARANGO_USER=root
+export ARANGO_PASS=changeme
 ```
 
 ---
@@ -413,8 +465,9 @@ v0.1.0 (Current)
 ├── Node/Edge/Provenance models
 ├── In-Memory + ArangoDB backends
 ├── REST API (17 endpoints)
-├── ORM (prototype-based)
-└── 54 tests, 74.57% coverage
+├── ORM (prototype-based, lazy loading)
+├── 93 tests (54 unit + 39 integration)
+└── Mock & live test modes
 
 v0.2.0 (MVP - Next)
 ├── Assertion model
@@ -452,5 +505,5 @@ v1.0.0 (Stable)
 
 ---
 
-*Version 3.0 | 2026-01-17*
+*Version 3.1 | 2026-01-14*
 *Single source of truth for KnowShowGo development*
