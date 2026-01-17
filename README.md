@@ -5,47 +5,51 @@ A semantic memory engine for AI agents — fuzzy ontology knowledge graph with p
 ## Quick Start
 
 ```bash
-# Install
 npm install
-
-# Run tests
-npm test
-
-# Start server
-npm start
-
-# Health check
-curl http://localhost:3000/health
+npm test           # 93 tests
+npm start          # Start server at http://localhost:3000
 ```
 
 ## What is KnowShowGo?
 
-KnowShowGo is a knowledge graph that combines:
+KnowShowGo is a knowledge graph that provides:
 - **Fuzzy matching** via vector embeddings
 - **Prototype-based OOP** (JavaScript-style inheritance)
 - **Lazy-loading ORM** with dynamic properties
-- **Assertions** with truth values and provenance
-- **WTA Resolution** for canonical snapshots
+- **REST API** for any client (Python, JS, etc.)
 
-## Features
+## For Humans: Getting Started
 
-| Feature | Status |
-|---------|--------|
-| Prototypes & Concepts | ✅ |
-| Semantic Search | ✅ |
-| Associations with Weights | ✅ |
-| ORM with Lazy Loading | ✅ |
-| REST API (17 endpoints) | ✅ |
-| In-Memory Backend | ✅ |
-| ArangoDB Backend | ✅ |
-| Docker Deployment | ✅ |
-| Assertions & WTA | ❌ Planned |
-| Pattern Evolution | ❌ Planned |
-| NeuroDAG Fuzzy Logic | ❌ Planned |
+### 1. Run the Server
 
-## Usage
+```bash
+# In-memory mode (no external dependencies)
+npm start
 
-### JavaScript API
+# With ArangoDB (persistent storage)
+KSG_MEMORY_BACKEND=arango npm start
+```
+
+### 2. Create Your First Data
+
+```bash
+# Create a prototype (like a class)
+curl -X POST http://localhost:3000/api/prototypes \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Person", "description": "A human individual"}'
+
+# Create a concept (like an instance)
+curl -X POST http://localhost:3000/api/concepts \
+  -H "Content-Type: application/json" \
+  -d '{"prototypeUuid": "YOUR_PROTO_UUID", "jsonObj": {"name": "John", "age": "30"}}'
+
+# Search
+curl -X POST http://localhost:3000/api/concepts/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "person named John", "topK": 5}'
+```
+
+### 3. Use with JavaScript
 
 ```javascript
 import { KnowShowGo, InMemoryMemory } from 'knowshowgo';
@@ -55,90 +59,121 @@ const ksg = new KnowShowGo({
   memory: new InMemoryMemory()
 });
 
-// Create prototype
-const personProto = await ksg.createPrototype({
-  name: 'Person',
-  description: 'A human individual',
-  embedding: await ksg.embedFn('Person human')
-});
-
-// Create concept
-const john = await ksg.createConcept({
-  prototypeUuid: personProto,
-  jsonObj: { name: 'John Doe', age: 30 },
-  embedding: await ksg.embedFn('John Doe person')
-});
-
-// Search
-const results = await ksg.searchConcepts({
-  query: 'person named John',
-  topK: 5
-});
-```
-
-### ORM with Lazy Loading
-
-```javascript
-// Register prototype - creates dynamic JS class
+// ORM with lazy loading
 const Person = await ksg.orm.registerPrototype('Person', {
-  properties: {
-    name: { type: 'string', required: true },
-    email: { type: 'string' },
-    age: { type: 'number' }
-  }
+  properties: { name: { type: 'string' }, age: { type: 'string' } }
 });
 
-// Create instance
-const john = await Person.create({
-  name: 'John Doe',
-  email: 'john@example.com',
-  age: 30
-});
-
-// Get instance - lazy loads properties
-const person = await Person.get(john.uuid);
-const name = await person._getProperty('name');
-
-// Find all
+const john = await Person.create({ name: 'John', age: '30' });
 const people = await Person.find();
 ```
 
-### REST API
+## For AI Agents: Integration Guide
 
-```bash
-# Create prototype
-curl -X POST http://localhost:3000/api/prototypes \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Person", "description": "A human"}'
+See [`docs/DEVELOPMENT-PLAN.md`](./docs/DEVELOPMENT-PLAN.md) for:
+- Full API reference
+- Integration patterns
+- Development workflow
+- Debugging instructions
 
-# Create concept
-curl -X POST http://localhost:3000/api/concepts \
-  -H "Content-Type: application/json" \
-  -d '{"prototypeUuid": "...", "jsonObj": {"name": "John"}}'
+### Quick Agent Integration
 
-# Search
-curl -X POST http://localhost:3000/api/concepts/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "person", "topK": 5}'
+```python
+# Python client (from your agent repo)
+from knowshowgo_client import KnowShowGoClient
+
+client = KnowShowGoClient("http://localhost:3000")
+uuid = client.create_concept(proto_uuid, {"name": "Test"})
+results = client.search("query", top_k=5)
+```
+
+```javascript
+// JavaScript client
+const response = await fetch('http://localhost:3000/api/concepts/search', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ query: 'test', topK: 5 })
+});
+const { results } = await response.json();
 ```
 
 ## Testing
 
+### Run All Tests (93 tests)
+
 ```bash
-# Run all tests (54 tests, 74% coverage)
 npm test
+```
 
-# With coverage report
-npm test -- --coverage
+### Mock vs Live Tests
 
-# Run specific test file
-npm test -- tests/rest-api.test.js
-
-# Run integration tests (mock)
+```bash
+# Mock mode (in-memory, no external deps)
 npm test -- tests/integration/
 
-# Run integration tests (live - requires ArangoDB)
+# Live mode (requires ArangoDB)
 TEST_LIVE=true npm test -- tests/integration/
+```
+
+### Debug Daemon (Continuous Testing)
+
+```bash
+# Run once with logging
+node scripts/debug-daemon.js --once
+
+# Run continuously (every 60s)
+node scripts/debug-daemon.js
+
+# Include live tests
+node scripts/debug-daemon.js --live
+
+# Custom interval (30s)
+node scripts/debug-daemon.js --interval 30000
+```
+
+Logs are written to `logs/` directory:
+- `debug-daemon.log` - Main daemon log
+- `health-checks.log` - Health check results (JSON)
+- `test-results.log` - Test run summaries (JSON)
+
+### Quick Live Test Script
+
+```bash
+# Run mock tests, then live if ArangoDB is available
+./scripts/test-live.sh
+
+# Force live tests
+./scripts/test-live.sh --live
+```
+
+## Development Workflow
+
+### Iterative Development Pattern
+
+1. **Make changes** to code
+2. **Run mock tests** to verify logic: `npm test -- tests/integration/`
+3. **Check daemon logs** if running: `tail -f logs/debug-daemon.log`
+4. **Run live tests** when ready: `TEST_LIVE=true npm test`
+5. **Update docs** after each iteration
+
+### Debugging Tandem Development
+
+When developing KnowShowGo alongside another repo (e.g., `osl-agent-prototype`):
+
+```bash
+# Terminal 1: KnowShowGo server
+cd knowshowgo && npm start
+
+# Terminal 2: Debug daemon (monitors health + runs tests)
+cd knowshowgo && node scripts/debug-daemon.js --live
+
+# Terminal 3: Your agent repo
+cd osl-agent-prototype && python your_agent.py
+```
+
+Monitor the daemon log for issues:
+```bash
+tail -f logs/debug-daemon.log
 ```
 
 ## Deployment
@@ -152,34 +187,7 @@ curl http://localhost:3000/health
 
 ### Oracle Cloud
 
-See deployment instructions in [DEVELOPMENT-PLAN.md](./docs/DEVELOPMENT-PLAN.md#10-deployment-oracle-cloud).
-
-## Documentation
-
-**Single source of truth:** [`docs/DEVELOPMENT-PLAN.md`](./docs/DEVELOPMENT-PLAN.md)
-
-Contains:
-- Core & cognitive primitives
-- REST API reference
-- JavaScript API reference
-- ORM patterns
-- Test coverage
-- Deployment guide
-- osl-agent-prototype integration
-- Version roadmap
-
-## Integration with osl-agent-prototype
-
-```bash
-# Seed the ontology
-curl -X POST http://localhost:3000/api/seed/osl-agent
-
-# Use from Python
-from knowshowgo_client import KnowShowGoClient
-client = KnowShowGoClient("http://localhost:3000")
-```
-
-See [DEVELOPMENT-PLAN.md#11](./docs/DEVELOPMENT-PLAN.md#11-osl-agent-prototype-integration) for full integration guide.
+See [`docs/DEVELOPMENT-PLAN.md#10`](./docs/DEVELOPMENT-PLAN.md#10-deployment-oracle-cloud).
 
 ## Project Structure
 
@@ -192,24 +200,34 @@ knowshowgo/
 │   ├── orm/               # ORM with lazy loading
 │   └── server/            # REST API
 ├── tests/
-│   ├── *.test.js          # Unit tests
-│   └── integration/       # E2E tests (mock + live)
+│   ├── *.test.js          # Unit tests (54)
+│   └── integration/       # E2E tests (39)
+├── scripts/
+│   ├── debug-daemon.js    # Continuous test daemon
+│   └── test-live.sh       # Live test runner
+├── logs/                  # Debug logs (gitignored)
 ├── docs/
-│   └── DEVELOPMENT-PLAN.md  # Single documentation file
-├── api/
-│   └── python/            # Python client
-└── docker-compose.yml
+│   └── DEVELOPMENT-PLAN.md  # Single source of truth
+└── api/
+    └── python/            # Python client
 ```
+
+## Documentation
+
+**Single source of truth:** [`docs/DEVELOPMENT-PLAN.md`](./docs/DEVELOPMENT-PLAN.md)
+
+Contains:
+- Core & cognitive primitives
+- REST API reference (17 endpoints)
+- JavaScript API reference
+- ORM patterns with lazy loading
+- Test coverage (93 tests)
+- Deployment guide
+- Agent integration guide
 
 ## Status
 
-**v0.1.0** - 54 tests passing, 74.57% coverage
-
-**Next (v0.2.0):**
-- Assertions with truth/strength
-- WTA Resolution
-- Pattern Evolution
-- Centroid Embeddings
+**v0.1.0** - 93 tests passing
 
 ## License
 

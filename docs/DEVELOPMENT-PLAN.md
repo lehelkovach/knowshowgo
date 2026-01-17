@@ -18,8 +18,9 @@
 8. [ORM Patterns](#8-orm-patterns)
 9. [Test Coverage](#9-test-coverage)
 10. [Deployment (Oracle Cloud)](#10-deployment-oracle-cloud)
-11. [osl-agent-prototype Integration](#11-osl-agent-prototype-integration)
-12. [Version Roadmap](#12-version-roadmap)
+11. [Agent Integration Guide](#11-agent-integration-guide)
+12. [Debugging & Development](#12-debugging--development)
+13. [Version Roadmap](#13-version-roadmap)
 
 ---
 
@@ -418,47 +419,298 @@ export OCI_COMPARTMENT_OCID='ocid1.compartment.oc1...'
 
 ---
 
-## 11. osl-agent-prototype Integration
+## 11. Agent Integration Guide
+
+This section is for **AI agents and developers** integrating KnowShowGo into other repositories.
+
+### Quick Start for Agents
+
+1. **Start KnowShowGo service** (separate terminal or Docker)
+2. **Use REST API** from your language/framework
+3. **Run debug daemon** for health monitoring
+
+### Architecture Pattern
+
+```
+Your Agent Repo (Python/JS/etc)
+├── Latency-sensitive (keep local)
+│   ├── WorkingMemoryGraph
+│   ├── AsyncReplicator
+│   └── DeterministicParser
+└── Semantic Memory (use KnowShowGo service)
+    └── KnowShowGoClient → http://localhost:3000
+```
+
+### Python Client Implementation
+
+```python
+"""
+knowshowgo_client.py - Copy to your repo
+"""
+import requests
+from typing import Optional, Dict, List, Any
+
+class KnowShowGoClient:
+    def __init__(self, base_url: str = "http://localhost:3000"):
+        self.base_url = base_url.rstrip('/')
+    
+    def health(self) -> Dict:
+        """Check service health."""
+        r = requests.get(f"{self.base_url}/health", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    
+    def create_prototype(self, name: str, description: str = "", **kwargs) -> str:
+        """Create a prototype (type/schema)."""
+        r = requests.post(f"{self.base_url}/api/prototypes", json={
+            "name": name,
+            "description": description,
+            **kwargs
+        })
+        r.raise_for_status()
+        return r.json()["uuid"]
+    
+    def create_concept(self, prototype_uuid: str, data: Dict[str, Any]) -> str:
+        """Create a concept (instance)."""
+        r = requests.post(f"{self.base_url}/api/concepts", json={
+            "prototypeUuid": prototype_uuid,
+            "jsonObj": data
+        })
+        r.raise_for_status()
+        return r.json()["uuid"]
+    
+    def get_concept(self, uuid: str) -> Optional[Dict]:
+        """Get a concept by UUID."""
+        r = requests.get(f"{self.base_url}/api/concepts/{uuid}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+    
+    def search(self, query: str, top_k: int = 10, threshold: float = 0.5) -> List[Dict]:
+        """Search for concepts."""
+        r = requests.post(f"{self.base_url}/api/concepts/search", json={
+            "query": query,
+            "topK": top_k,
+            "similarityThreshold": threshold
+        })
+        r.raise_for_status()
+        return r.json()["results"]
+    
+    def add_association(self, from_uuid: str, to_uuid: str, 
+                        rel_type: str, strength: float = 1.0) -> None:
+        """Create association between concepts."""
+        r = requests.post(f"{self.base_url}/api/associations", json={
+            "fromConceptUuid": from_uuid,
+            "toConceptUuid": to_uuid,
+            "relationType": rel_type,
+            "strength": strength
+        })
+        r.raise_for_status()
+```
+
+### JavaScript Client Implementation
+
+```javascript
+/**
+ * knowshowgo-client.js - Copy to your repo
+ */
+export class KnowShowGoClient {
+  constructor(baseUrl = 'http://localhost:3000') {
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
+
+  async health() {
+    const res = await fetch(`${this.baseUrl}/health`);
+    if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+    return res.json();
+  }
+
+  async createPrototype(name, description = '', options = {}) {
+    const res = await fetch(`${this.baseUrl}/api/prototypes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description, ...options })
+    });
+    if (!res.ok) throw new Error(`Create prototype failed: ${res.status}`);
+    return (await res.json()).uuid;
+  }
+
+  async createConcept(prototypeUuid, data) {
+    const res = await fetch(`${this.baseUrl}/api/concepts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prototypeUuid, jsonObj: data })
+    });
+    if (!res.ok) throw new Error(`Create concept failed: ${res.status}`);
+    return (await res.json()).uuid;
+  }
+
+  async search(query, topK = 10, threshold = 0.5) {
+    const res = await fetch(`${this.baseUrl}/api/concepts/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, topK, similarityThreshold: threshold })
+    });
+    if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+    return (await res.json()).results;
+  }
+}
+```
+
+### Environment Variables (Your Repo)
+
+```bash
+# Required
+KNOWSHOWGO_URL=http://localhost:3000
+
+# Optional
+USE_KNOWSHOWGO_SERVICE=true
+KNOWSHOWGO_TIMEOUT=5000
+```
+
+### Refactoring Checklist for Other Repos
+
+When refactoring your agent to use KnowShowGo:
+
+1. **Identify memory operations** in your codebase
+   - Creating entities/concepts
+   - Searching/querying
+   - Creating relationships
+   - Updating properties
+
+2. **Decide what stays local vs remote**
+   - **Local**: Real-time operations, session state, caching
+   - **Remote**: Persistent storage, semantic search, knowledge base
+
+3. **Implement the client** (copy from above)
+
+4. **Add health checks** before critical operations
+   ```python
+   try:
+       client.health()
+   except Exception:
+       # Fall back to local cache or queue for retry
+   ```
+
+5. **Handle network failures gracefully**
+   - Queue failed writes for retry
+   - Cache frequent reads locally
+   - Log all KSG interactions for debugging
+
+### osl-agent-prototype Specific
 
 **Handoff Doc:** `https://github.com/lehelkovach/osl-agent-prototype/blob/main/docs/KNOWSHOWGO-SERVICE-HANDOFF.md`
-
-### Architecture
-
-```
-osl-agent-prototype (Python)
-├── WorkingMemoryGraph (local)
-├── AsyncReplicator (local)
-├── DeterministicParser (local)
-└── KnowShowGoClient → knowshowgo-js service (remote)
-```
-
-### Existing Branches in osl-agent-prototype
 
 | Branch | Contains |
 |--------|----------|
 | `archived/knowshowgo-service` | FastAPI service, Python client, adapter |
 | `cursor/knowshowgo-repo-push-c83c` | Handoff docs |
 
-### Python Client Usage
+---
 
-```python
-from knowshowgo.client import KnowShowGoClient
+## 12. Debugging & Development
 
-client = KnowShowGoClient(base_url="http://localhost:3000")
-uuid = client.create_concept(prototype_uuid, {"name": "Test"})
-results = client.search("query", top_k=5)
-```
+### Debug Daemon
 
-### Environment Variables
+Run continuous health checks and tests:
 
 ```bash
-KNOWSHOWGO_URL=http://localhost:3000
-USE_KNOWSHOWGO_SERVICE=true
+# Single run with logging
+node scripts/debug-daemon.js --once
+
+# Continuous monitoring (60s interval)
+node scripts/debug-daemon.js
+
+# Include live ArangoDB tests
+node scripts/debug-daemon.js --live
+
+# Custom interval
+node scripts/debug-daemon.js --interval 30000
+```
+
+### Log Files
+
+| File | Contents |
+|------|----------|
+| `logs/debug-daemon.log` | Main daemon activity |
+| `logs/health-checks.log` | Health check JSON results |
+| `logs/test-results.log` | Test run summaries |
+
+### Tandem Development Workflow
+
+When developing KnowShowGo alongside another repo:
+
+**Terminal 1: KnowShowGo Server**
+```bash
+cd knowshowgo
+npm start
+```
+
+**Terminal 2: Debug Daemon**
+```bash
+cd knowshowgo
+node scripts/debug-daemon.js --live
+```
+
+**Terminal 3: Your Agent**
+```bash
+cd your-agent-repo
+# Run your agent, tests, etc.
+```
+
+**Terminal 4: Monitor Logs**
+```bash
+cd knowshowgo
+tail -f logs/debug-daemon.log
+```
+
+### Debugging Checklist
+
+1. **Service not responding?**
+   - Check `curl http://localhost:3000/health`
+   - Check `docker compose ps` if using Docker
+   - Check logs: `docker compose logs knowshowgo-api`
+
+2. **Tests failing?**
+   - Run mock tests first: `npm test -- tests/integration/`
+   - Check daemon log for patterns: `grep -i error logs/debug-daemon.log`
+   - Run specific test: `npm test -- tests/integration/api.integration.test.js`
+
+3. **Live tests failing but mock passing?**
+   - Check ArangoDB: `curl http://localhost:8529/_api/version`
+   - Verify credentials in env vars
+   - Check connection: `ARANGO_URL=... node -e "..."`
+
+4. **Performance issues?**
+   - Check health latency in `logs/health-checks.log`
+   - Monitor test duration in `logs/test-results.log`
+   - Profile with: `npm test -- --detectOpenHandles`
+
+### Development Iteration Pattern
+
+```
+1. Make code changes
+         ↓
+2. Run mock tests (fast feedback)
+   npm test -- tests/integration/
+         ↓
+3. Check daemon logs (if running)
+   tail -f logs/debug-daemon.log
+         ↓
+4. Run live tests (when ready)
+   TEST_LIVE=true npm test -- tests/integration/
+         ↓
+5. Update docs (README first, then DEVELOPMENT-PLAN.md)
+         ↓
+6. Commit and push
+         ↓
+7. Repeat
 ```
 
 ---
 
-## 12. Version Roadmap
+## 13. Version Roadmap
 
 ```
 v0.1.0 (Current)
@@ -505,5 +757,6 @@ v1.0.0 (Stable)
 
 ---
 
-*Version 3.1 | 2026-01-14*
+*Version 3.2 | 2026-01-14*
 *Single source of truth for KnowShowGo development*
+*Updated: Debug daemon, agent integration guide, tandem development workflow*
