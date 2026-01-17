@@ -12,11 +12,12 @@ npm start          # Start server at http://localhost:3000
 
 ## What is KnowShowGo?
 
-KnowShowGo is a knowledge graph that provides:
-- **Fuzzy matching** via vector embeddings
-- **Prototype-based OOP** (JavaScript-style inheritance)
-- **Lazy-loading ORM** with dynamic properties
-- **REST API** for any client (Python, JS, etc.)
+KnowShowGo is a **semantic memory engine** where:
+- **Assertions are truth-bearing** — All facts have truth/strength/provenance
+- **Evidence vs Snapshot** — Auditable raw data vs canonical derived view
+- **Claims deduplicate** — Multiple sources merge via embedding similarity
+- **Logic is computable** — NeuroSym engine for fuzzy reasoning
+- **Prototype theory** — Types emerge from exemplar aggregation
 
 ## For Humans: Getting Started
 

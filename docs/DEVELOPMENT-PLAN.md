@@ -1,821 +1,679 @@
 # KnowShowGo Development Plan
 
-**Version:** 3.0  
-**Status:** Single source of truth for all development  
-**Repository:** `https://github.com/lehelkovach/knowshowgo`
+**Version:** 4.0  
+**Date:** 2026-01-17  
+**North Star:** KnowShowGo is a semantic memory engine where **Assertions are the only truth-bearing units**, Evidence is auditable, Snapshot is canonical-by-policy, and prototype-theory emerges from exemplar aggregation.
 
 ---
 
 ## Table of Contents
 
-1. [Executive Summary](#1-executive-summary)
-2. [Core Primitives](#2-core-primitives)
-3. [Cognitive Primitives](#3-cognitive-primitives)
-4. [NeuroDAG: Fuzzy Logic](#4-neurodag-fuzzy-logic)
-5. [Implementation Status](#5-implementation-status)
-6. [REST API Reference](#6-rest-api-reference)
-7. [JavaScript API Reference](#7-javascript-api-reference)
-8. [ORM Patterns](#8-orm-patterns)
-9. [Test Coverage](#9-test-coverage)
-10. [Deployment (Oracle Cloud)](#10-deployment-oracle-cloud)
-11. [Agent Integration Guide](#11-agent-integration-guide)
-12. [Debugging & Development](#12-debugging--development)
-13. [Version Roadmap](#13-version-roadmap)
+1. [Prime Directives](#1-prime-directives)
+2. [Architecture Overview](#2-architecture-overview)
+3. [Core Primitives](#3-core-primitives)
+4. [Claims & Deduplication](#4-claims--deduplication)
+5. [NeuroSym Logic Engine](#5-neurosym-logic-engine)
+6. [Staged Implementation](#6-staged-implementation)
+7. [API Reference](#7-api-reference)
+8. [ORM & Client SDK](#8-orm--client-sdk)
+9. [osl-agent-prototype Integration](#9-osl-agent-prototype-integration)
+10. [Deployment & Debugging](#10-deployment--debugging)
+11. [Repo Strategy](#11-repo-strategy)
+12. [Definition of Done](#12-definition-of-done)
 
 ---
 
-## 1. Executive Summary
+## 1. Prime Directives
 
-KnowShowGo is a semantic memory engine for AI agents, providing:
+**Do not violate these principles:**
 
-- **4 Core Primitives** — Entity, Type, Predicate, Assertion
-- **Cognitive Memory** — WorkingMemory with Hebbian reinforcement
-- **Fuzzy Logic** — NeuroDAG propositions with WTA resolution
-- **Dual Views** — Evidence (auditable) vs Snapshot (canonical)
-
-**Current Status:** 93 tests passing (54 unit + 39 integration)
+1. **Do not store facts twice** — Graph of Assertions is authoritative; snapshots are derived
+2. **Assertions are truth-bearing** — truth/strength/voteScore/sourceRel/provenance live on Assertions
+3. **Resolver policy is reproducible** — WTA must explain why a value won
+4. **Everything writes to the spine** — UI, ORM, seeder, procedures, logic graphs all create Assertions
+5. **Backward compatible endpoints** — Preserve existing API shapes while transitioning
+6. **Embeddings are indexes, not truth** — Embeddings help retrieval/clustering; Assertions determine truth
 
 ---
 
-## 2. Core Primitives
+## 2. Architecture Overview
 
-| Primitive | Purpose | Implementation |
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         KnowShowGo Architecture                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │   Agents    │    │  Curator UI │    │   Seeder    │    │  NeuroSym   │  │
+│  │ (osl-agent) │    │   (Human)   │    │  (Import)   │    │  (Logic)    │  │
+│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘  │
+│         │                  │                  │                  │          │
+│         └──────────────────┴──────────────────┴──────────────────┘          │
+│                                    │                                         │
+│                          ┌─────────▼─────────┐                              │
+│                          │    REST API       │                              │
+│                          │  /api/assertions  │                              │
+│                          │  /api/snapshot    │                              │
+│                          │  /api/neuro/solve │                              │
+│                          └─────────┬─────────┘                              │
+│                                    │                                         │
+│         ┌──────────────────────────┼──────────────────────────┐             │
+│         │                          │                          │             │
+│         ▼                          ▼                          ▼             │
+│  ┌─────────────┐          ┌─────────────┐          ┌─────────────┐         │
+│  │ Assertions  │          │  WTA        │          │  Claim      │         │
+│  │ (Truth)     │◄────────►│  Resolver   │◄────────►│  Clusters   │         │
+│  └─────────────┘          └─────────────┘          └─────────────┘         │
+│         │                          │                          │             │
+│         │                          ▼                          │             │
+│         │                 ┌─────────────┐                     │             │
+│         │                 │  Snapshot   │                     │             │
+│         │                 │  (Derived)  │                     │             │
+│         │                 └─────────────┘                     │             │
+│         │                                                     │             │
+│         └─────────────────────────┬───────────────────────────┘             │
+│                                   │                                          │
+│                          ┌────────▼────────┐                                │
+│                          │  Memory Backend │                                │
+│                          │ (InMem/Arango)  │                                │
+│                          └─────────────────┘                                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. Core Primitives
+
+### 3.1 The Four Primitives
+
+| Primitive | Purpose | Key Properties |
 |-----------|---------|----------------|
-| **Entity** | Stable UUID identity anchor | `Node` class |
-| **Type** | Category/schema (also an Entity) | `Node` with `isPrototype: true` |
-| **Predicate** | Property/relation kind | `Node` with `isPredicate: true` |
-| **Assertion** | First-class belief with weights + provenance | `Assertion` class |
+| **Entity** | Stable UUID identity anchor | `uuid`, `embedding`, `labels` |
+| **Type** | Category/schema (also an Entity) | `isPrototype: true`, `centroid` |
+| **Predicate** | Property/relation kind | `isPredicate: true`, `valueType` |
+| **Assertion** | First-class belief with weights | See below |
 
-### Assertion Model
+### 3.2 Assertion Model (The Spine)
 
-```javascript
-class Assertion {
-  constructor({
-    subject,           // Entity UUID
-    predicate,         // Predicate UUID or string
-    object,            // Entity UUID or literal value
-    truth = 1.0,       // [0,1] probability claim is correct
-    strength = 1.0,    // [0,1] association salience
-    voteScore = 0,     // Community votes
-    sourceRel = 1.0,   // [0,1] provenance reliability
-    provenance = null,
-    status = 'accepted',
-    uuid = uuidv4(),
-    prevAssertionId = null
-  }) { ... }
+```typescript
+interface Assertion {
+  uuid: string;
+  
+  // Triple
+  subject: string;      // Entity UUID
+  predicate: string;    // Predicate UUID or string
+  object: string | any; // Entity UUID or literal value
+  
+  // Truth-bearing weights
+  truth: TruthValue;      // [0,1] probability claim is correct
+  strength: TruthValue;   // [0,1] association salience
+  voteScore: number;      // Community votes (+/-)
+  sourceRel: TruthValue;  // [0,1] source reliability
+  
+  // Metadata
+  provenance: Provenance;
+  status: 'pending' | 'accepted' | 'disputed' | 'merged' | 'retracted';
+  prevAssertionId?: string; // For edit lineage
+  
+  // Deduplication (optional)
+  clusterId?: string;     // Claim cluster membership
+  isCanonical?: boolean;  // Is this the merged winner?
 }
 ```
 
----
+### 3.3 Provenance Envelope
 
-## 3. Cognitive Primitives
-
-### 3.1 WorkingMemoryGraph
-
-Session-scoped activation with Hebbian reinforcement.
-
-```javascript
-class WorkingMemoryGraph {
-  link(fromUuid, toUuid, initialWeight = 1.0)
-  access(fromUuid, toUuid)  // Reinforce on use
-  decayAll()                // Periodic decay
-  getWeight(fromUuid, toUuid)
+```typescript
+interface Provenance {
+  source: 'user' | 'agent' | 'llm' | 'import' | 'system';
+  sourceRef?: string;     // userId, agentId, URL
+  method: 'manual' | 'llm_extract' | 'import_wikidata' | 'solver_neurodag' | 'observation';
+  ts: string;             // ISO-8601
+  traceId: string;        // Run/session UUID
+  inputs?: string[];      // Input assertion UUIDs (for derived)
+  confidence: TruthValue;
 }
 ```
 
-### 3.2 WTA Resolution
+### 3.4 WTA Resolver
 
-Convert competing assertions to canonical snapshot.
-
-```javascript
+```typescript
 const DEFAULT_POLICY = {
-  weights: { truth: 0.45, voteScore: 0.20, sourceRel: 0.15, recency: 0.10, strength: 0.10 }
+  weights: {
+    truth: 0.35,
+    voteScore: 0.20,
+    sourceRel: 0.20,
+    recency: 0.15,
+    strength: 0.10
+  },
+  tieBreaker: 'most_recent'
 };
 
 class WTAResolver {
-  scoreAssertion(assertion)
-  resolve(assertions) // Returns { snapshot, evidence }
+  scoreAssertion(a: Assertion): number {
+    return (
+      a.truth * weights.truth +
+      normalize(a.voteScore) * weights.voteScore +
+      a.sourceRel * weights.sourceRel +
+      recencyScore(a) * weights.recency +
+      a.strength * weights.strength
+    );
+  }
+  
+  resolve(assertions: Assertion[]): {
+    winner: Assertion;
+    snapshot: Record<string, any>;
+    evidence: Assertion[];
+    explanation: string;
+  }
 }
 ```
 
-### 3.3 Pattern Evolution (v0.2.0)
+---
 
-```javascript
-ksg.findSimilarPatterns(query, { minSimilarity: 0.6 })
-ksg.transferPattern(sourceUuid, targetContext, llmFn)
-ksg.recordPatternSuccess(patternUuid, context)
-ksg.autoGeneralize(patternUuid, { minSimilar: 2 })
+## 4. Claims & Deduplication
+
+### 4.1 Claim Pipeline
+
+Claims are Assertions with deduplication support:
+
+```
+┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
+│ Ingest  │───►│ Embed & │───►│ Cluster │───►│ Curate/ │───►│ Promote │
+│ Claim   │    │Normalize│    │ Similar │    │ Merge   │    │ to Fact │
+└─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘
 ```
 
-### 3.4 Centroid-Based Embeddings (v0.2.0)
+### 4.2 Claim Cluster
 
-```javascript
-ksg.addExemplar(conceptUuid, exemplarEmbedding)
-ksg.getConceptCentroid(conceptUuid)
-ksg.recomputeCentroid(conceptUuid)
+```typescript
+interface ClaimCluster {
+  id: string;
+  canonicalAssertionId?: string;  // Merged winner
+  memberIds: string[];            // All assertions in cluster
+  centroidEmbedding: number[];    // Mean embedding
+  mergePolicy: 'auto' | 'manual' | 'voting';
+  state: {
+    needsReview: boolean;
+    similarity: number;  // Min similarity in cluster
+  };
+}
 ```
 
-### 3.5 First-Class Edges (v0.2.0)
+### 4.3 Deduplication Flow
 
-```javascript
-ksg.createRelationship({ fromUuid, toUuid, relType, properties, embedding })
-ksg.searchRelationships(query)
+1. **On new assertion:** Embed the claim text
+2. **Search similar:** Find assertions with cosine similarity > threshold
+3. **Cluster:** Add to existing cluster or create new one
+4. **Auto-merge (optional):** If similarity > 0.95 and same source type
+5. **Manual review:** Flag clusters with 0.8 < similarity < 0.95
+
+### 4.4 Merge Strategies
+
+| Strategy | Formula | When |
+|----------|---------|------|
+| **Source-Weighted** | `Σ(sourceRel × truth) / Σ(sourceRel)` | Multiple agents |
+| **Consensus** | `median(truths)` if N+ sources agree | High-stakes |
+| **Recency-Biased** | `0.7 × newest + 0.3 × weighted` | Time-sensitive |
+| **Manual** | Human picks | Disputes |
+
+---
+
+## 5. NeuroSym Logic Engine
+
+### 5.1 NeuroJSON Schema
+
+Logic represented as computable DAG:
+
+```typescript
+interface NeuroJSON {
+  version: string;
+  variables: Record<string, Variable>;
+  rules: Rule[];
+  constraints: Constraint[];
+}
+
+interface Variable {
+  type: 'bool' | 'continuous';
+  prior: TruthValue;
+  locked?: boolean;
+}
+
+interface Rule {
+  id: string;
+  type: 'IMPLICATION' | 'CONJUNCTION' | 'DISJUNCTION' | 'EQUIVALENCE';
+  inputs: string[];
+  output: string;
+  op: 'IDENTITY' | 'AND' | 'OR' | 'NOT' | 'WEIGHTED';
+  weight: TruthValue;
+  learnable?: boolean;
+}
+
+interface Constraint {
+  id: string;
+  type: 'ATTACK' | 'SUPPORT' | 'MUTEX';
+  source: string;
+  target: string | string[];
+  weight: TruthValue;
+}
+```
+
+### 5.2 Logic Operations (Lukasiewicz T-Norms)
+
+| Operation | Formula | Use |
+|-----------|---------|-----|
+| NOT | `1 - a` | Negation |
+| AND | `max(0, Σa - (n-1))` | Conjunction |
+| OR | `min(1, Σa)` | Disjunction |
+| IMPLIES | `min(1, 1 - a + b)` | Implication |
+| ATTACK | `target × (1 - attacker × weight)` | Inhibition |
+| SUPPORT | `target + (1-target) × src × weight` | Reinforcement |
+
+### 5.3 Integration with Assertions
+
+NeuroDAG nodes are backed by Assertions:
+
+```typescript
+// A proposition becomes an Assertion
+const prop = await ksg.createAssertion({
+  subject: 'context:risk_model',
+  predicate: 'hasProposition',
+  object: 'prop:server_down',
+  truth: 1.0,
+  provenance: { method: 'observation' }
+});
+
+// Rules are also Assertions
+const rule = await ksg.createAssertion({
+  subject: 'prop:server_down',
+  predicate: 'implies',
+  object: 'prop:churn_risk',
+  truth: 0.9,  // Rule weight
+  provenance: { method: 'manual' }
+});
 ```
 
 ---
 
-## 4. NeuroDAG: Fuzzy Logic
+## 6. Staged Implementation
 
-| Node Type | Props | Purpose |
-|-----------|-------|---------|
-| Proposition | `isProposition: true`, `neuro: {type, truth, prior}` | Atomic fact |
-| Rule | `isRule: true`, `neurodag: {type: 'IMPLICATION', weight}` | Inference |
-| Attack | `isAttack: true`, `neurodag: {type: 'ATTACK', weight}` | Defeater |
+### Stage 1: Assertion Spine (v0.2.0) 🔴 CRITICAL
 
-| Operation | Formula |
-|-----------|---------|
-| Implication | `target = source × weight` |
-| Fuzzy OR | `max(v1, v2, ...)` |
-| Fuzzy AND | `max(0, Σv - (n-1))` |
-| Attack | `val × (1 - attacker × weight)` |
+**Priority: Enables everything else**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| Assertion model | ❌ | `src/models/assertion.js` |
+| Assertion CRUD | ❌ | `createAssertion`, `getAssertions`, `vote` |
+| WTA Resolver | ❌ | `src/resolution/wta-resolver.js` |
+| Snapshot endpoint | ❌ | `GET /api/entities/:id/snapshot` |
+| Evidence endpoint | ❌ | `GET /api/entities/:id/evidence` |
+| Explain endpoint | ❌ | `GET /api/entities/:id/explain` |
+| createConcept → Assertions | ❌ | Expand jsonObj into assertions |
+| Tests | ❌ | 20+ new tests |
+
+**Acceptance:** Assertions can be created, queried, voted on. Snapshot derives from WTA.
+
+### Stage 2: Procedures as DAGs (v0.2.1) 🔴 CRITICAL FOR AGENT
+
+**Priority: Agent memory for workflows**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| Procedure as Entity Type | ✅ | Seeded via osl-agent |
+| Step as Entity Type | ✅ | Seeded |
+| Step ordering via Assertions | ❌ | `next`, `order` predicates |
+| Step semantics | ❌ | `does`, `usesSelector`, `expects` |
+| Procedure retrieval | ❌ | `GET /api/procedures/:id` → DAG JSON |
+| Procedure search | ✅ | `POST /api/procedures/search` |
+
+**Acceptance:** Agent can store learned workflow and retrieve by semantic search.
+
+### Stage 3: Claim Deduplication (v0.2.2) 🟡 HIGH
+
+**Priority: Multiple sources reporting same thing**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| ClaimCluster model | ❌ | `src/models/claim-cluster.js` |
+| Duplicate detection | ❌ | On assertion create, find similar |
+| Cluster CRUD | ❌ | `POST /api/clusters`, `GET /api/clusters/:id` |
+| Merge endpoint | ❌ | `POST /api/claims/merge` |
+| Auto-merge policy | ❌ | Configurable threshold |
+
+**Acceptance:** Duplicate claims are detected and can be merged.
+
+### Stage 4: WorkingMemoryGraph (v0.2.3) 🟡 HIGH
+
+**Priority: Agent session state**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| WorkingMemoryGraph class | ❌ | `src/memory/working-memory.js` |
+| Hebbian link/access/decay | ❌ | Methods implemented |
+| Export as npm class | ❌ | Usable by agents |
+| Session persistence (optional) | ❌ | Save/restore |
+
+**Acceptance:** Agents can use WMG for session-scoped activation.
+
+### Stage 5: NeuroSym Engine (v0.3.0) 🟡 HIGH
+
+**Priority: Logic/reasoning capability**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| Port types.ts | ❌ | `src/neuro/types.js` |
+| Port logic-core.ts | ❌ | `src/neuro/logic-core.js` |
+| Port engine.ts | ❌ | `src/neuro/engine.js` |
+| REST endpoint | ❌ | `POST /api/neuro/solve` |
+| Integration with Assertions | ❌ | NeuroDAG nodes are Assertions |
+
+**Acceptance:** Can define logic graph and run inference.
+
+### Stage 6: Prototype Theory (v0.3.1) 🟢 MEDIUM
+
+**Priority: Dynamic schemas, UI scaffolding**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| Type.centroid | ❌ | Weighted centroid of exemplars |
+| addExemplar | ❌ | Add instance to type |
+| recomputeCentroid | ❌ | Update on exemplar change |
+| Feature template | ❌ | Aggregate predicates from exemplars |
+| recomputeTemplate | ❌ | Derive recommended predicates |
+
+**Acceptance:** Types have computed centroids and feature templates.
+
+### Stage 7: Arango Parity (v0.4.0) 🟢 MEDIUM
+
+**Priority: Production persistence**
+
+| Task | Status | Deliverable |
+|------|--------|-------------|
+| Assertion storage | ❌ | Arango collection |
+| Cluster storage | ❌ | Arango collection |
+| Snapshot AQL | ❌ | Efficient WTA query |
+| Live tests | ❌ | `TEST_LIVE=true` passing |
 
 ---
 
-## 5. Implementation Status
+## 7. API Reference
 
-### ✅ Implemented
-
-| Component | File | Coverage |
-|-----------|------|----------|
-| Node/Edge/Provenance | `src/models.js` | 100% |
-| In-Memory backend | `src/memory/in-memory.js` | 87% |
-| ArangoDB backend | `src/memory/arango-memory.js` | 0% (needs live DB) |
-| REST API | `src/server/rest-api.js` | 75% |
-| ORM | `src/orm/ksg-orm.js` | 90% |
-| Core API | `src/knowshowgo.js` | 83% |
-
-### ❌ Not Yet Implemented
-
-| Component | Priority |
-|-----------|----------|
-| Assertion class | 🔴 Critical |
-| WTAResolver | 🔴 Critical |
-| WorkingMemoryGraph | 🔴 Critical |
-| Pattern Evolution | 🔴 Critical |
-| Centroid Embeddings | 🟡 High |
-| First-Class Edges | 🟡 High |
-
----
-
-## 6. REST API Reference
-
-### Existing Endpoints ✅
+### 7.1 Existing Endpoints ✅
 
 ```
-GET  /health                    # Health check
-POST /api/prototypes            # Create prototype
-GET  /api/prototypes/:uuid      # Get prototype
-POST /api/concepts              # Create concept
-GET  /api/concepts/:uuid        # Get concept
-POST /api/concepts/search       # Search concepts
-POST /api/associations          # Create association
-POST /api/nodes                 # Upsert node
-POST /api/knodes                # Create knode (node+doc+tags)
-POST /api/procedures            # Create procedure DAG
-POST /api/seed/osl-agent        # Seed osl-agent ontology
+GET  /health
+POST /api/prototypes
+GET  /api/prototypes/:uuid
+POST /api/concepts
+GET  /api/concepts/:uuid
+POST /api/concepts/search
+POST /api/associations
+POST /api/nodes
+POST /api/knodes
+POST /api/procedures
+POST /api/procedures/search
+POST /api/seed/osl-agent
+POST /api/orm/register
+POST /api/orm/:proto/create
+GET  /api/orm/:proto/:uuid
 ```
 
-### New Endpoints (v0.2.0) ❌
+### 7.2 New Endpoints (v0.2.0+) ❌
 
 ```
 # Assertions
-POST /api/assertions
-GET  /api/assertions
-POST /api/assertions/:id/vote
+POST /api/assertions              # Create assertion
+GET  /api/assertions              # Query (filter by subject/predicate/object)
+POST /api/assertions/:id/vote     # Vote on assertion
+GET  /api/assertions/:id/lineage  # Edit history
 
 # Snapshot/Evidence
-GET  /api/entities/:id/snapshot
-GET  /api/entities/:id/evidence
+GET  /api/entities/:id/snapshot   # Canonical values (WTA winners)
+GET  /api/entities/:id/evidence   # All competing assertions
+GET  /api/entities/:id/explain    # Why value X won
 
-# Patterns
-POST /api/patterns/similar
-POST /api/patterns/transfer
-POST /api/patterns/:id/success
-POST /api/patterns/:id/generalize
+# Claims/Deduplication
+POST /api/claims/similar          # Find similar claims
+GET  /api/clusters/:id            # Get cluster with members
+POST /api/claims/merge            # Merge claims into canonical
+POST /api/claims/:id/promote      # Promote to verified fact
 
-# Relationships
-POST /api/relationships
-POST /api/relationships/search
-
-# Centroids
-POST /api/concepts/:id/exemplar
-GET  /api/concepts/:id/centroid
+# NeuroSym
+POST /api/neuro/solve             # Run inference on logic graph
+POST /api/neuro/transpile         # Convert to natural language
 ```
 
 ---
 
-## 7. JavaScript API Reference
+## 8. ORM & Client SDK
 
-### Quick Start
-
-```javascript
-import { KnowShowGo, InMemoryMemory } from 'knowshowgo';
-
-const ksg = new KnowShowGo({
-  embedFn: async (text) => yourEmbeddingService(text),
-  memory: new InMemoryMemory()
-});
-```
-
-### Core Methods
-
-```javascript
-// Prototypes
-const protoUuid = await ksg.createPrototype({
-  name: 'Person',
-  description: 'A human individual',
-  embedding: await embed('Person')
-});
-
-// Concepts
-const conceptUuid = await ksg.createConcept({
-  prototypeUuid,
-  jsonObj: { name: 'John Doe', age: 30 },
-  embedding: await embed('John Doe')
-});
-
-// Search
-const results = await ksg.searchConcepts({
-  query: 'person named John',
-  topK: 5,
-  similarityThreshold: 0.7
-});
-
-// Associations
-await ksg.addAssociation({
-  fromConceptUuid: person1,
-  toConceptUuid: person2,
-  relationType: 'knows',
-  strength: 0.8
-});
-```
-
-### Data Models
-
-```javascript
-// Node
-{ uuid, kind: 'topic', labels: [], props: { isPrototype, ... }, llmEmbedding: [] }
-
-// Edge
-{ uuid, fromNode, toNode, rel, props: { w: 1.0, confidence: 1.0 } }
-
-// Provenance
-{ source: 'user', ts: 'ISO-timestamp', confidence: 1.0, traceId: 'knowshowgo' }
-```
-
----
-
-## 8. ORM Patterns
-
-### EntityFacade (Target)
+### 8.1 EntityFacade Pattern
 
 ```javascript
 const bob = ksg.entity('uuid-bob');
-await bob.assert('hasAge', 40, { truth: 0.95 });
+
+// Write via Assertions
+await bob.assert('hasAge', 40, { truth: 0.95, source: 'user' });
+await bob.assert('worksAt', companyId, { strength: 0.8 });
+
+// Read via Snapshot (derived)
 const snapshot = await bob.snapshot();
-const evidence = await bob.evidence();
+console.log(snapshot.hasAge);  // 40
+
+// Inspect Evidence
+const evidence = await bob.evidence('hasAge');
+// Returns: [{ value: 40, truth: 0.95, ... }, { value: 39, truth: 0.3, ... }]
+
+// Vote
+await bob.vote('hasAge', assertionId, +1);
 ```
 
-### NeuroDAGFacade (Target)
+### 8.2 Lazy ORM (Existing)
 
 ```javascript
-const neuro = ksg.neurodag();
-const prop = await neuro.addProposition('Server offline', { type: 'DIGITAL', truth: 1.0 });
-await neuro.addRule(prop, churnRisk, { type: 'IMPLICATION', weight: 0.9 });
-const results = await neuro.solve();
+const Person = await ksg.orm.registerPrototype('Person', {
+  properties: {
+    name: { type: 'string', required: true },
+    age: { type: 'string' }
+  }
+});
+
+const john = await Person.create({ name: 'John', age: '30' });
+const retrieved = await Person.get(john.uuid);
+const name = await retrieved._getProperty('name');
+```
+
+### 8.3 Client SDK (JavaScript)
+
+```javascript
+import { KnowShowGoClient } from 'knowshowgo-client';
+
+const client = new KnowShowGoClient('http://localhost:3000');
+
+// Assertions
+const assertionId = await client.assert(subjectId, 'hasAge', 40, { truth: 0.9 });
+await client.vote(assertionId, +1);
+
+// Snapshot
+const snapshot = await client.snapshot(entityId);
+
+// Search
+const results = await client.search('person named John', { topK: 5 });
+
+// NeuroSym
+const result = await client.solve(neuroJSON, { 'fact_a': 1.0 });
 ```
 
 ---
 
-## 9. Test Coverage
+## 9. osl-agent-prototype Integration
 
-**Total: 93 tests | 10 suites**
-
-| Suite | Tests | Description |
-|-------|-------|-------------|
-| Unit Tests | 54 | Core functionality |
-| Integration Tests | 39 | E2E & API tests |
-
-| File | Lines |
-|------|-------|
-| `src/models.js` | 100% |
-| `src/orm/ksg-orm.js` | 90% |
-| `src/memory/in-memory.js` | 87% |
-| `src/knowshowgo.js` | 83% |
-| `src/server/rest-api.js` | 75% |
-| `src/memory/arango-memory.js` | 0% |
-
-### Test Structure
+### 9.1 Architecture
 
 ```
-tests/
-├── knowshowgo.test.js         # Core API tests
-├── orm.test.js                # ORM unit tests
-├── rest-api.test.js           # REST API tests
-├── assertion.test.js          # Assertion model tests
-├── multiple-inheritance.test.js
-├── fully-unified-architecture.test.js
-├── refined-architecture.test.js
-└── integration/
-    ├── setup.js               # Test helpers & fixtures
-    ├── api.integration.test.js    # API integration tests
-    ├── orm.integration.test.js    # ORM integration tests
-    └── e2e-workflow.integration.test.js  # E2E workflow tests
+osl-agent-prototype (Python)
+├── WorkingMemoryGraph (LOCAL - latency sensitive)
+├── AsyncReplicator (LOCAL - queues writes)
+├── DeterministicParser (LOCAL - rule-based NLP)
+└── KnowShowGoClient → knowshowgo service (REMOTE)
+    ├── Store learned procedures
+    ├── Retrieve similar workflows
+    ├── Assert observations
+    └── Query semantic memory
 ```
 
-### Run Tests
-
-```bash
-# Run all tests (93 tests)
-npm test
-
-# With coverage report
-npm test -- --coverage
-
-# Run specific test file
-npm test -- tests/rest-api.test.js
-
-# Run integration tests only (mock mode)
-npm test -- tests/integration/
-
-# Run integration tests with live ArangoDB
-TEST_LIVE=true npm test -- tests/integration/
-```
-
-### Mock vs Live Mode
-
-Integration tests support both mock and live connection modes:
-
-| Mode | Environment | Backend |
-|------|-------------|---------|
-| **Mock** (default) | `TEST_LIVE=false` | In-memory |
-| **Live** | `TEST_LIVE=true` | ArangoDB |
-
-For live mode, configure these environment variables:
-
-```bash
-export ARANGO_URL=http://localhost:8529
-export ARANGO_DB=knowshowgo_test
-export ARANGO_USER=root
-export ARANGO_PASS=changeme
-```
-
----
-
-## 10. Deployment (Oracle Cloud)
-
-### Prerequisites
-
-- Ubuntu VM (OCI Free Tier - Ampere or AMD)
-- Ports: 22 (SSH), 3000 (API)
-
-### Quick Deploy
-
-```bash
-# On VM
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-
-git clone https://github.com/lehelkovach/knowshowgo.git /opt/knowshowgo/repo
-cd /opt/knowshowgo/repo
-docker compose up -d --build
-
-# Verify
-curl http://localhost:3000/health
-```
-
-### GitHub Auto-Deploy
-
-Set these secrets in GitHub repo settings:
-
-| Secret | Value |
-|--------|-------|
-| `OCI_SSH_HOST` | VM public IP |
-| `OCI_SSH_USER` | `ubuntu` |
-| `OCI_SSH_PRIVATE_KEY` | SSH private key |
-
-Pushes to `main` auto-deploy via `.github/workflows/deploy-oci.yml`.
-
-### One-Command Provision (OCI CLI)
-
-```bash
-export OCI_COMPARTMENT_OCID='ocid1.compartment.oc1...'
-./scripts/local-oci-provision-and-configure-gh-deploy.sh \
-  --repo lehelkovach/knowshowgo \
-  --compartment $OCI_COMPARTMENT_OCID \
-  --ssh-public-key ~/.ssh/id_ed25519.pub \
-  --ssh-private-key ~/.ssh/id_ed25519
-```
-
----
-
-## 11. Agent Integration Guide
-
-This section is for **AI agents and developers** integrating KnowShowGo into other repositories.
-
-### Quick Start for Agents
-
-1. **Start KnowShowGo service** (separate terminal or Docker)
-2. **Use REST API** from your language/framework
-3. **Run debug daemon** for health monitoring
-
-### Architecture Pattern
-
-```
-Your Agent Repo (Python/JS/etc)
-├── Latency-sensitive (keep local)
-│   ├── WorkingMemoryGraph
-│   ├── AsyncReplicator
-│   └── DeterministicParser
-└── Semantic Memory (use KnowShowGo service)
-    └── KnowShowGoClient → http://localhost:3000
-```
-
-### Python Client Implementation
+### 9.2 What Agent Stores
 
 ```python
-"""
-knowshowgo_client.py - Copy to your repo
-"""
-import requests
-from typing import Optional, Dict, List, Any
+# Store a learned workflow
+procedure_id = client.create_procedure(
+    title="LinkedIn Login",
+    steps=[
+        {"action": "navigate", "selector": "linkedin.com"},
+        {"action": "click", "selector": "#login-button"},
+        {"action": "type", "selector": "#username", "value": "..."}
+    ]
+)
 
-class KnowShowGoClient:
-    def __init__(self, base_url: str = "http://localhost:3000"):
-        self.base_url = base_url.rstrip('/')
-    
-    def health(self) -> Dict:
-        """Check service health."""
-        r = requests.get(f"{self.base_url}/health", timeout=5)
-        r.raise_for_status()
-        return r.json()
-    
-    def create_prototype(self, name: str, description: str = "", **kwargs) -> str:
-        """Create a prototype (type/schema)."""
-        r = requests.post(f"{self.base_url}/api/prototypes", json={
-            "name": name,
-            "description": description,
-            **kwargs
-        })
-        r.raise_for_status()
-        return r.json()["uuid"]
-    
-    def create_concept(self, prototype_uuid: str, data: Dict[str, Any]) -> str:
-        """Create a concept (instance)."""
-        r = requests.post(f"{self.base_url}/api/concepts", json={
-            "prototypeUuid": prototype_uuid,
-            "jsonObj": data
-        })
-        r.raise_for_status()
-        return r.json()["uuid"]
-    
-    def get_concept(self, uuid: str) -> Optional[Dict]:
-        """Get a concept by UUID."""
-        r = requests.get(f"{self.base_url}/api/concepts/{uuid}")
-        if r.status_code == 404:
-            return None
-        r.raise_for_status()
-        return r.json()
-    
-    def search(self, query: str, top_k: int = 10, threshold: float = 0.5) -> List[Dict]:
-        """Search for concepts."""
-        r = requests.post(f"{self.base_url}/api/concepts/search", json={
-            "query": query,
-            "topK": top_k,
-            "similarityThreshold": threshold
-        })
-        r.raise_for_status()
-        return r.json()["results"]
-    
-    def add_association(self, from_uuid: str, to_uuid: str, 
-                        rel_type: str, strength: float = 1.0) -> None:
-        """Create association between concepts."""
-        r = requests.post(f"{self.base_url}/api/associations", json={
-            "fromConceptUuid": from_uuid,
-            "toConceptUuid": to_uuid,
-            "relationType": rel_type,
-            "strength": strength
-        })
-        r.raise_for_status()
+# Store an observation as Assertion
+client.assert(
+    subject=session_id,
+    predicate="observed",
+    object="login_successful",
+    truth=1.0,
+    provenance={"source": "agent", "method": "observation"}
+)
 ```
 
-### JavaScript Client Implementation
+### 9.3 What Agent Queries
 
-```javascript
-/**
- * knowshowgo-client.js - Copy to your repo
- */
-export class KnowShowGoClient {
-  constructor(baseUrl = 'http://localhost:3000') {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
-  }
+```python
+# Find similar procedure
+results = client.search_procedures("log into linkedin", top_k=3)
 
-  async health() {
-    const res = await fetch(`${this.baseUrl}/health`);
-    if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-    return res.json();
-  }
+# Get procedure DAG
+procedure = client.get_procedure(procedure_id)
+for step in procedure.steps:
+    execute(step)
 
-  async createPrototype(name, description = '', options = {}) {
-    const res = await fetch(`${this.baseUrl}/api/prototypes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, ...options })
-    });
-    if (!res.ok) throw new Error(`Create prototype failed: ${res.status}`);
-    return (await res.json()).uuid;
-  }
-
-  async createConcept(prototypeUuid, data) {
-    const res = await fetch(`${this.baseUrl}/api/concepts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prototypeUuid, jsonObj: data })
-    });
-    if (!res.ok) throw new Error(`Create concept failed: ${res.status}`);
-    return (await res.json()).uuid;
-  }
-
-  async search(query, topK = 10, threshold = 0.5) {
-    const res = await fetch(`${this.baseUrl}/api/concepts/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, topK, similarityThreshold: threshold })
-    });
-    if (!res.ok) throw new Error(`Search failed: ${res.status}`);
-    return (await res.json()).results;
-  }
-}
+# Get entity snapshot
+user_data = client.snapshot(user_entity_id)
 ```
 
-### Environment Variables (Your Repo)
+### 9.4 Environment Variables
 
 ```bash
-# Required
 KNOWSHOWGO_URL=http://localhost:3000
-
-# Optional
 USE_KNOWSHOWGO_SERVICE=true
 KNOWSHOWGO_TIMEOUT=5000
 ```
 
-### Refactoring Checklist for Other Repos
-
-When refactoring your agent to use KnowShowGo:
-
-1. **Identify memory operations** in your codebase
-   - Creating entities/concepts
-   - Searching/querying
-   - Creating relationships
-   - Updating properties
-
-2. **Decide what stays local vs remote**
-   - **Local**: Real-time operations, session state, caching
-   - **Remote**: Persistent storage, semantic search, knowledge base
-
-3. **Implement the client** (copy from above)
-
-4. **Add health checks** before critical operations
-   ```python
-   try:
-       client.health()
-   except Exception:
-       # Fall back to local cache or queue for retry
-   ```
-
-5. **Handle network failures gracefully**
-   - Queue failed writes for retry
-   - Cache frequent reads locally
-   - Log all KSG interactions for debugging
-
-### osl-agent-prototype Specific
-
-**Handoff Doc:** `https://github.com/lehelkovach/osl-agent-prototype/blob/main/docs/KNOWSHOWGO-SERVICE-HANDOFF.md`
-
-| Branch | Contains |
-|--------|----------|
-| `archived/knowshowgo-service` | FastAPI service, Python client, adapter |
-| `cursor/knowshowgo-repo-push-c83c` | Handoff docs |
-
 ---
 
-## 12. Debugging & Development
+## 10. Deployment & Debugging
 
-### Debug Daemon
-
-Run continuous health checks and tests:
+### 10.1 Local Development
 
 ```bash
-# Single run with logging
-node scripts/debug-daemon.js --once
-
-# Continuous monitoring (60s interval)
-node scripts/debug-daemon.js
-
-# Include live ArangoDB tests
-node scripts/debug-daemon.js --live
-
-# Custom interval
-node scripts/debug-daemon.js --interval 30000
+npm run dev                                    # Hot reload
+docker compose -f docker-compose.dev.yml up   # Docker with hot reload
 ```
 
-### Log Files
+### 10.2 Remote Development (OCI)
 
-| File | Contents |
-|------|----------|
-| `logs/debug-daemon.log` | Main daemon activity |
-| `logs/health-checks.log` | Health check JSON results |
-| `logs/test-results.log` | Test run summaries |
-
-### Tandem Development Workflow
-
-When developing KnowShowGo alongside another repo:
-
-**Terminal 1: KnowShowGo Server**
 ```bash
-cd knowshowgo
-npm start
-```
-
-**Terminal 2: Debug Daemon**
-```bash
-cd knowshowgo
-node scripts/debug-daemon.js --live
-```
-
-**Terminal 3: Your Agent**
-```bash
-cd your-agent-repo
-# Run your agent, tests, etc.
-```
-
-**Terminal 4: Monitor Logs**
-```bash
-cd knowshowgo
-tail -f logs/debug-daemon.log
-```
-
-### Debugging Checklist
-
-1. **Service not responding?**
-   - Check `curl http://localhost:3000/health`
-   - Check `docker compose ps` if using Docker
-   - Check logs: `docker compose logs knowshowgo-api`
-
-2. **Tests failing?**
-   - Run mock tests first: `npm test -- tests/integration/`
-   - Check daemon log for patterns: `grep -i error logs/debug-daemon.log`
-   - Run specific test: `npm test -- tests/integration/api.integration.test.js`
-
-3. **Live tests failing but mock passing?**
-   - Check ArangoDB: `curl http://localhost:8529/_api/version`
-   - Verify credentials in env vars
-   - Check connection: `ARANGO_URL=... node -e "..."`
-
-4. **Performance issues?**
-   - Check health latency in `logs/health-checks.log`
-   - Monitor test duration in `logs/test-results.log`
-   - Profile with: `npm test -- --detectOpenHandles`
-
-### Development Iteration Pattern
-
-```
-1. Make code changes
-         ↓
-2. Run mock tests (fast feedback)
-   npm test -- tests/integration/
-         ↓
-3. Check daemon logs (if running)
-   tail -f logs/debug-daemon.log
-         ↓
-4. Run live tests (when ready)
-   TEST_LIVE=true npm test -- tests/integration/
-         ↓
-5. Update docs (README first, then DEVELOPMENT-PLAN.md)
-         ↓
-6. Commit and push
-         ↓
-7. Repeat
-```
-
-### Remote Development on OCI
-
-**Setup:**
-```bash
-# 1. Configure connection
 cp .env.remote.example .env.remote
-# Edit with your OCI VM details:
-#   OCI_SSH_HOST=123.45.67.89
-#   OCI_SSH_USER=ubuntu
-#   OCI_SSH_KEY=~/.ssh/id_ed25519
+# Edit with your OCI VM details
+
+./scripts/remote-dev.sh status    # Check services
+./scripts/remote-dev.sh logs      # Stream logs
+./scripts/remote-dev.sh deploy    # Pull & restart
+./scripts/remote-dev.sh hotfix "fix"  # Commit + push + deploy
+./scripts/remote-dev.sh rollback  # Rollback to previous
 ```
 
-**Commands:**
+### 10.3 Debug Daemon
+
 ```bash
-./scripts/remote-dev.sh status      # Check services
-./scripts/remote-dev.sh logs        # Stream API logs
-./scripts/remote-dev.sh logs db     # Stream ArangoDB logs
-./scripts/remote-dev.sh shell       # Shell into container
-./scripts/remote-dev.sh deploy      # Pull & restart
-./scripts/remote-dev.sh hotfix "x"  # Commit + push + deploy
-./scripts/remote-dev.sh test        # Run tests on remote
-./scripts/remote-dev.sh health      # Health check
-./scripts/remote-dev.sh rollback    # Rollback to prev commit
-./scripts/remote-dev.sh ssh         # SSH to server
+node scripts/debug-daemon.js --once    # Single run
+node scripts/debug-daemon.js --live    # Include live tests
 ```
 
-**Continuous Monitoring:**
+### 10.4 Test Modes
+
 ```bash
-# Watch health with alerts
-./scripts/watch-remote.sh --url http://YOUR_IP:3000 --interval 30
-```
-
-**Hotfix Workflow:**
-```bash
-# 1. Make fix locally
-vim src/knowshowgo.js
-
-# 2. Test locally first
-npm test
-
-# 3. Deploy in one command
-./scripts/remote-dev.sh hotfix "fix: resolve XYZ bug"
-
-# 4. Verify
-./scripts/remote-dev.sh health
-```
-
-**Development Docker (Hot Reload):**
-```bash
-# Local development with Docker + hot reload
-docker compose -f docker-compose.dev.yml up
-
-# Includes:
-# - Source mounted as volume
-# - Node --watch mode
-# - Debug port 9229 exposed
-# - Logs persisted to ./logs
+npm test                              # All tests (93)
+npm test -- tests/integration/        # Integration only
+TEST_LIVE=true npm test               # With ArangoDB
 ```
 
 ---
 
-## 13. Version Roadmap
+## 11. Repo Strategy
 
-```
-v0.1.0 (Current)
-├── Node/Edge/Provenance models
-├── In-Memory + ArangoDB backends
-├── REST API (17 endpoints)
-├── ORM (prototype-based, lazy loading)
-├── 93 tests (54 unit + 39 integration)
-└── Mock & live test modes
+### 11.1 Multi-Repo (Recommended for Scale)
 
-v0.2.0 (MVP - Next)
-├── Assertion model
-├── WorkingMemoryGraph
-├── WTA Resolution
-├── Pattern Evolution
-├── Centroid Embeddings
-└── First-Class Edges
+| Repo | Purpose |
+|------|---------|
+| `knowshowgo` | Core service + REST API |
+| `knowshowgo-js` | Client SDK + ORM |
+| `knowshowgo-curator` | Human web UI |
+| `knowshowgo-seeder` | ETL + import tools |
+| `neurosym-js` | Logic engine (standalone) |
 
-v0.3.0 (NeuroDAG)
-├── createProposition, createRule, createDAG
-├── Voting endpoints
-└── ResolutionPolicy as Entity
+### 11.2 Current Branch Strategy
 
-v0.4.0 (GraphRAG)
-├── Fact embeddings
-├── Hybrid search
-├── TransE link prediction
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable releases |
+| `cursor/current-system-status-*` | Active development |
+| `dev/assertions` | Assertion spine work |
+| `dev/neuro` | NeuroSym integration |
 
-v1.0.0 (Stable)
-├── npm publish
-├── Production deployment
-```
+---
+
+## 12. Definition of Done
+
+### v0.2.0 (Assertion Spine) ✅ when:
+- [ ] Assertion CRUD + voting shipped
+- [ ] Snapshot/evidence/explain endpoints working
+- [ ] createConcept expands jsonObj into assertions
+- [ ] Procedures storable/retrievable by search
+- [ ] 20+ new tests passing
+
+### v0.2.2 (Deduplication) ✅ when:
+- [ ] Duplicate detection on assertion create
+- [ ] Cluster CRUD endpoints
+- [ ] Merge endpoint working
+- [ ] Auto-merge with configurable threshold
+
+### v0.3.0 (NeuroSym) ✅ when:
+- [ ] Logic engine ported from TypeScript
+- [ ] `/api/neuro/solve` endpoint
+- [ ] NeuroDAG nodes backed by Assertions
+- [ ] 50+ logic tests passing
+
+### v1.0.0 (Production) ✅ when:
+- [ ] Arango parity complete
+- [ ] Live tests passing
+- [ ] npm package published
+- [ ] Deployed on OCI
 
 ---
 
 ## Non-Negotiables
 
-1. **Do not store facts twice** — Graph is authoritative; snapshots are derived
-2. **Assertions are truth-bearing** — Weights, provenance, votes live on Assertions
-3. **Policies are first-class** — Resolution must be reproducible
-4. **Keep primitives small** — Entity/Type/Predicate/Assertion only
-5. **Hebbian reinforcement** — "Fire together, wire together"
-6. **Backward compatibility** — Existing endpoints continue to work
+1. **Assertions are truth-bearing** — Never treat jsonObj or snapshots as authoritative
+2. **Resolver is reproducible** — Same inputs → same output, with explanation
+3. **Provenance on everything** — Every assertion has source, method, timestamp
+4. **Backward compatible** — Existing endpoints continue to work
+5. **Embeddings are indexes** — Help retrieval, don't determine truth
+6. **Finish the spine first** — Everything else becomes easy after Assertions + Resolver
 
 ---
 
-*Version 3.3 | 2026-01-17*
-*Single source of truth for KnowShowGo development*
-*Updated: Remote development tools, hotfix workflow, continuous monitoring*
+*Version 4.0 | 2026-01-17*
+*Unified plan: Assertions + Claims/Dedup + NeuroSym + Prototype Theory*
+*Priority: osl-agent-prototype functionality first*
