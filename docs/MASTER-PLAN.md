@@ -1,8 +1,8 @@
 # KnowShowGo Master Plan
 
-**Version:** 1.0  
-**Status:** Canonical planning document  
-**Consolidates:** gpt-plans.md, opus-plans.md, salvage-knowshowgo.txt, NEUROSYM_MASTER_PLAN.md
+**Version:** 2.0  
+**Status:** Canonical planning document (single source of truth)  
+**Consolidates:** gpt-plans, opus-plans, salvage-knowshowgo, NEUROSYM_MASTER_PLAN, GRAPHRAG-EMBEDDINGS, ORM-API-REFACTOR
 
 ---
 
@@ -356,7 +356,7 @@ v0.1.0 (Current)
 ├── ORM (prototype-based)
 └── 54 tests, 74.57% coverage
 
-v0.2.0 (MVP - This Plan)
+v0.2.0 (MVP)
 ├── Assertion model
 ├── WorkingMemoryGraph
 ├── WTA Resolution
@@ -364,11 +364,26 @@ v0.2.0 (MVP - This Plan)
 ├── EntityFacade ORM
 └── AsyncReplicator
 
-v0.3.0 (Post-MVP)
-├── NeuroDAG methods
+v0.3.0 (NeuroDAG)
+├── NeuroDAG methods (createProposition, createRule, createDAG)
 ├── Voting endpoints
 ├── ResolutionPolicy as Entity
 └── Python SDK sync
+
+v0.4.0 (GraphRAG Phase 1)
+├── Fact embeddings (assertion as sentence)
+├── /api/search/facts endpoint
+├── Triple text generation
+
+v0.5.0 (GraphRAG Phase 2)
+├── Hybrid search (vector → graph traversal)
+├── NeuroSym reasoning integration
+├── /api/graphrag/query endpoint
+
+v0.6.0 (Link Prediction)
+├── TransE predicate embeddings
+├── /api/predict/link endpoint
+├── /api/predict/predicate endpoint
 
 v1.0.0 (Stable)
 ├── Full documentation
@@ -379,7 +394,115 @@ v1.0.0 (Stable)
 
 ---
 
-## 12. Quick Reference
+## 12. GraphRAG & Advanced Embeddings (Post-MVP)
+
+### Three Embedding Levels
+
+| Level | What | Use Case |
+|-------|------|----------|
+| **Entity** | Node/concept embedding | Semantic search (current) |
+| **Predicate** | TransE relationship vector | Link prediction |
+| **Triple/Fact** | Assertion as sentence | Hybrid RAG search |
+
+### TransE Link Prediction
+
+```javascript
+// Math: Subject + Predicate ≈ Object
+score(s, p, o) = -||embed(s) + embed(p) - embed(o)||
+
+// Predict missing object
+predictObject(subject, predicate) → topK candidates
+// Predict missing predicate  
+predictPredicate(subject, object) → topK candidates
+```
+
+### GraphRAG Query Flow
+
+```
+User Query → Vector Search (facts) → Graph Traversal → NeuroSym Reasoning → WTA → Answer
+```
+
+### Future API Endpoints
+
+```
+POST /api/search/facts          # Search assertion embeddings
+POST /api/predict/link          # TransE object prediction
+POST /api/predict/predicate     # TransE predicate prediction
+POST /api/graphrag/query        # Full hybrid RAG query
+```
+
+---
+
+## 13. ORM Refactoring Details
+
+### EntityFacade Pattern
+
+```javascript
+// Target ORM usage
+const bob = ksg.entity('uuid-bob');
+
+// Assert facts
+await bob.assert('hasAge', 40, { truth: 0.95 });
+await bob.assert('worksFor', 'acme-uuid');
+
+// Get canonical snapshot (WTA-resolved)
+const snapshot = await bob.snapshot();
+// { hasAge: { value: 40, truth: 0.95 }, worksFor: { value: 'acme-uuid' } }
+
+// Get all evidence (auditable)
+const evidence = await bob.evidence();
+// { hasAge: [{ value: 40, truth: 0.95 }, { value: 39, truth: 0.6 }] }
+
+// Get specific property with evidence
+const age = await bob.get('hasAge');
+// { value: 40, evidence: [...] }
+
+// Find related entities
+const colleagues = await bob.related('worksFor');
+```
+
+### AssertionManager
+
+```javascript
+// Batch assertion creation
+const manager = new AssertionManager(ksg);
+
+await manager.batch([
+  { subject: bob, predicate: 'hasAge', object: 40 },
+  { subject: bob, predicate: 'email', object: 'bob@acme.com' }
+]);
+
+// Query assertions
+const ageAssertions = await manager.getByPredicate('hasAge');
+const bobAssertions = await manager.getBySubject(bob.uuid);
+```
+
+### NeuroDAGFacade
+
+```javascript
+// Create neuro structures via ORM
+const neuro = ksg.neurodag();
+
+const serverDown = await neuro.addProposition('Server is offline', {
+  type: 'DIGITAL', truth: 1.0, is_locked: true
+});
+
+const churnRisk = await neuro.addProposition('Churn risk', {
+  type: 'FUZZY', prior: 0.2
+});
+
+await neuro.addRule(serverDown, churnRisk, {
+  type: 'IMPLICATION', weight: 0.9
+});
+
+// Solve and get results
+const results = await neuro.solve();
+// { 'churn_risk': 0.9 }
+```
+
+---
+
+## 14. Quick Reference
 
 ### Create Assertion
 ```javascript
@@ -420,4 +543,5 @@ const boost = wm.getActivationBoost(entityA, entityB);
 ---
 
 *Document created: 2026-01-14*  
-*Consolidates: gpt-plans.md, opus-plans.md, salvage-knowshowgo.txt, NEUROSYM_MASTER_PLAN.md*
+*Version 2.0: 2026-01-17*  
+*Single source of truth for all KnowShowGo planning*
