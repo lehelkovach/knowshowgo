@@ -177,7 +177,7 @@ Each stage ships the **smallest useful increment**. Cut anything that isn't esse
 
 ---
 
-### v0.2.0: Assertions (THE SPINE) 🔴
+### v0.2.0: Assertions (THE SPINE) ✅ DONE
 
 **One job:** Make assertions work.
 
@@ -343,7 +343,7 @@ TEST_LIVE=true npm test     # With ArangoDB
 
 | Version | Done When |
 |---------|-----------|
-| **v0.2.0** | Assertions CRUD + snapshot works. 10 tests. |
+| **v0.2.0** | ✅ Assertions CRUD + snapshot works. 22 tests. |
 | **v0.2.1** | Agent stores/retrieves procedures. 5 tests. |
 | **v0.2.2** | WorkingMemoryGraph class works. 5 tests. |
 | **v0.2.3** | Duplicate detection returns similar claims. 5 tests. |

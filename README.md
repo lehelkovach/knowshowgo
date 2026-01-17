@@ -6,7 +6,7 @@ A semantic memory engine for AI agents — fuzzy ontology knowledge graph with p
 
 ```bash
 npm install
-npm test           # 93 tests
+npm test           # 115 tests
 npm start          # Start server at http://localhost:3000
 ```
 
