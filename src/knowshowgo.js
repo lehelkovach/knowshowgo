@@ -1321,7 +1321,7 @@ export class KnowShowGo {
     
     const matchedFact = bestMatch.props;
     
-    // Check for contradiction (same subject+predicate, different object)
+    // Check for contradiction (different subject/object for same relation)
     const possibleContradiction = await this._findContradiction(claimLower, matchedFact, factNodes);
     
     if (possibleContradiction) {
@@ -1332,6 +1332,21 @@ export class KnowShowGo {
         claim,
         matchingFact: null,
         contradictingFact: possibleContradiction
+      };
+    }
+    
+    // Additional check: if claim mentions the predicate and object but NOT the subject
+    // this is likely a false attribution
+    if (claimLower.includes(matchedFact.predicate) && 
+        claimLower.includes(matchedFact.object) && 
+        !claimLower.includes(matchedFact.subject)) {
+      return {
+        status: 'refuted',
+        confidence: bestSimilarity,
+        reason: `False attribution: The correct fact is "${matchedFact.subject} ${matchedFact.predicate} ${matchedFact.object}"`,
+        claim,
+        matchingFact: null,
+        contradictingFact: matchedFact
       };
     }
     
@@ -1374,26 +1389,30 @@ export class KnowShowGo {
    * @private
    */
   async _findContradiction(claimLower, matchedFact, factNodes) {
-    // Simple heuristic: if claim contains subject+predicate but different object
     const { subject, predicate, object } = matchedFact;
     
-    // Check if claim mentions subject and predicate
-    if (claimLower.includes(subject) && claimLower.includes(predicate)) {
-      // But does NOT match the object - might be contradiction
-      if (!claimLower.includes(object)) {
-        // Find what the claim says
-        for (const otherFact of factNodes) {
-          if (otherFact.props.subject === subject && 
-              otherFact.props.predicate === predicate &&
-              otherFact.props.object !== object) {
-            // Different object for same subject+predicate
-            if (claimLower.includes(otherFact.props.object)) {
-              // Claim mentions this other object - it's a contradiction
-              return matchedFact; // Return the correct fact
-            }
+    // Heuristic 1: Claim mentions predicate but DIFFERENT subject
+    // e.g., "Edison invented telephone" contradicts "Bell invented telephone"
+    if (claimLower.includes(predicate) && claimLower.includes(object)) {
+      if (!claimLower.includes(subject)) {
+        // Claims same predicate+object but different subject
+        // Check if there's a known fact with this predicate+object
+        for (const fact of factNodes) {
+          if (fact.props.predicate === predicate && 
+              fact.props.object === object &&
+              claimLower.includes(fact.props.subject)) {
+            // Claim mentions a different subject - not a contradiction
+            return null;
           }
         }
-        // Claim mentions subject+predicate but wrong object
+        // No matching subject found - this is a contradiction
+        return matchedFact;
+      }
+    }
+    
+    // Heuristic 2: Claim mentions subject+predicate but different object
+    if (claimLower.includes(subject) && claimLower.includes(predicate)) {
+      if (!claimLower.includes(object)) {
         return matchedFact;
       }
     }
