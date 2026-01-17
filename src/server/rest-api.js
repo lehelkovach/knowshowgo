@@ -640,6 +640,100 @@ app.get('/api/entities/:id/evidence', async (req, res) => {
   }
 });
 
+// ===== Verification / Hallucination Detection Endpoints =====
+
+/**
+ * POST /api/facts
+ * Store a verified fact (for hallucination detection ground truth)
+ */
+app.post('/api/facts', async (req, res) => {
+  try {
+    const { subject, predicate, object, status, confidence, source } = req.body;
+    
+    if (!subject || !predicate || !object) {
+      return res.status(400).json({ error: 'subject, predicate, and object are required' });
+    }
+    
+    const fact = await ksg.storeFact({
+      subject,
+      predicate,
+      object,
+      status: status || 'verified',
+      confidence: confidence ?? 1.0,
+      source: source || null
+    });
+    
+    res.json(fact);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/facts/bulk
+ * Store multiple verified facts at once
+ */
+app.post('/api/facts/bulk', async (req, res) => {
+  try {
+    const { facts } = req.body;
+    
+    if (!Array.isArray(facts)) {
+      return res.status(400).json({ error: 'facts array is required' });
+    }
+    
+    const results = [];
+    for (const f of facts) {
+      if (!f.subject || !f.predicate || !f.object) continue;
+      
+      const fact = await ksg.storeFact({
+        subject: f.subject,
+        predicate: f.predicate,
+        object: f.object,
+        status: f.status || 'verified',
+        confidence: f.confidence ?? 1.0,
+        source: f.source || null
+      });
+      results.push(fact);
+    }
+    
+    res.json({ stored: results.length, facts: results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/verify
+ * Verify a claim against stored facts (hallucination detection)
+ */
+app.post('/api/verify', async (req, res) => {
+  try {
+    const { claim, threshold } = req.body;
+    
+    if (!claim) {
+      return res.status(400).json({ error: 'claim is required' });
+    }
+    
+    const result = await ksg.verify(claim, { threshold: threshold ?? 0.7 });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/facts/stats
+ * Get statistics about stored facts
+ */
+app.get('/api/facts/stats', async (req, res) => {
+  try {
+    const stats = await ksg.getFactStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error(err);

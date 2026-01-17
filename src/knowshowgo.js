@@ -1185,5 +1185,258 @@ export class KnowShowGo {
       return new Date(b.createdAt) - new Date(a.createdAt);
     })[0];
   }
+
+  // ============================================================================
+  // VERIFICATION / HALLUCINATION DETECTION (MVP)
+  // ============================================================================
+
+  /**
+   * Store a verified fact (triple with provenance).
+   * 
+   * @param {Object} params
+   * @param {string} params.subject - Subject entity (e.g., "Bell")
+   * @param {string} params.predicate - Relation (e.g., "invented")
+   * @param {string} params.object - Object entity (e.g., "telephone")
+   * @param {string} [params.status='verified'] - verified|refuted|unverified
+   * @param {number} [params.confidence=1.0] - Confidence [0,1]
+   * @param {Object} [params.source] - Provenance source
+   * @returns {Promise<Object>} Stored fact
+   */
+  async storeFact({ subject, predicate, object, status = 'verified', confidence = 1.0, source = null }) {
+    // Normalize to lowercase for matching
+    const normSubject = subject.toLowerCase().trim();
+    const normPredicate = predicate.toLowerCase().trim();
+    const normObject = object.toLowerCase().trim();
+    
+    // Create a fact ID for deduplication
+    const factKey = `${normSubject}|${normPredicate}|${normObject}`;
+    
+    // Store as assertion with verification metadata
+    const assertion = await this.createAssertion({
+      subject: factKey,
+      predicate: 'is_fact',
+      object: JSON.stringify({
+        subject: normSubject,
+        predicate: normPredicate,
+        object: normObject,
+        status,
+        source: source || { type: 'user' }
+      }),
+      truth: confidence,
+      source: 'verification'
+    });
+    
+    // Also create searchable embedding for semantic matching
+    const factText = `${subject} ${predicate} ${object}`;
+    const embedding = await this.embedFn(factText);
+    
+    const factNode = new Node({
+      kind: 'fact',
+      labels: [factKey, 'verified_fact'],
+      props: {
+        subject: normSubject,
+        predicate: normPredicate,
+        object: normObject,
+        status,
+        confidence,
+        source: source || { type: 'user' },
+        assertionId: assertion.uuid,
+        rawText: factText
+      },
+      llmEmbedding: embedding
+    });
+    
+    const prov = new Provenance({
+      source: 'verification',
+      ts: new Date().toISOString(),
+      confidence,
+      traceId: 'fact-store'
+    });
+    
+    await this.memory.upsert(factNode, prov, { embeddingRequest: false });
+    
+    return {
+      uuid: factNode.uuid,
+      assertionId: assertion.uuid,
+      subject: normSubject,
+      predicate: normPredicate,
+      object: normObject,
+      status,
+      confidence
+    };
+  }
+
+  /**
+   * Verify a claim against stored facts.
+   * 
+   * @param {string} claim - Natural language claim to verify
+   * @param {Object} [options]
+   * @param {number} [options.threshold=0.7] - Similarity threshold
+   * @returns {Promise<Object>} Verification result
+   */
+  async verify(claim, { threshold = 0.7 } = {}) {
+    const claimLower = claim.toLowerCase().trim();
+    const claimEmbedding = await this.embedFn(claim);
+    
+    // Get all fact nodes
+    const allNodes = await this._getAllNodes();
+    const factNodes = allNodes.filter(n => n.kind === 'fact');
+    
+    if (factNodes.length === 0) {
+      return {
+        status: 'unverified',
+        confidence: 0,
+        reason: 'No facts in knowledge base',
+        claim,
+        matchingFact: null,
+        contradictingFact: null
+      };
+    }
+    
+    // Find best matching fact by embedding similarity
+    let bestMatch = null;
+    let bestSimilarity = 0;
+    
+    for (const fact of factNodes) {
+      if (!fact.llmEmbedding) continue;
+      
+      const similarity = this._cosineSimilarity(claimEmbedding, fact.llmEmbedding);
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestMatch = fact;
+      }
+    }
+    
+    // No good match
+    if (!bestMatch || bestSimilarity < threshold) {
+      return {
+        status: 'unverified',
+        confidence: bestSimilarity,
+        reason: `No matching fact found (best similarity: ${(bestSimilarity * 100).toFixed(1)}%)`,
+        claim,
+        matchingFact: null,
+        contradictingFact: null
+      };
+    }
+    
+    const matchedFact = bestMatch.props;
+    
+    // Check for contradiction (same subject+predicate, different object)
+    const possibleContradiction = await this._findContradiction(claimLower, matchedFact, factNodes);
+    
+    if (possibleContradiction) {
+      return {
+        status: 'refuted',
+        confidence: bestSimilarity,
+        reason: `Contradicts known fact: "${possibleContradiction.subject} ${possibleContradiction.predicate} ${possibleContradiction.object}"`,
+        claim,
+        matchingFact: null,
+        contradictingFact: possibleContradiction
+      };
+    }
+    
+    // Verified - matches a known fact
+    if (matchedFact.status === 'verified') {
+      return {
+        status: 'verified',
+        confidence: bestSimilarity * matchedFact.confidence,
+        reason: `Matches verified fact: "${matchedFact.subject} ${matchedFact.predicate} ${matchedFact.object}"`,
+        claim,
+        matchingFact: matchedFact,
+        contradictingFact: null
+      };
+    }
+    
+    // Known to be false
+    if (matchedFact.status === 'refuted') {
+      return {
+        status: 'refuted',
+        confidence: bestSimilarity,
+        reason: `Claim matches known false fact`,
+        claim,
+        matchingFact: null,
+        contradictingFact: matchedFact
+      };
+    }
+    
+    return {
+      status: 'unverified',
+      confidence: bestSimilarity,
+      reason: 'Fact status unclear',
+      claim,
+      matchingFact: matchedFact,
+      contradictingFact: null
+    };
+  }
+
+  /**
+   * Find if claim contradicts a known fact.
+   * @private
+   */
+  async _findContradiction(claimLower, matchedFact, factNodes) {
+    // Simple heuristic: if claim contains subject+predicate but different object
+    const { subject, predicate, object } = matchedFact;
+    
+    // Check if claim mentions subject and predicate
+    if (claimLower.includes(subject) && claimLower.includes(predicate)) {
+      // But does NOT match the object - might be contradiction
+      if (!claimLower.includes(object)) {
+        // Find what the claim says
+        for (const otherFact of factNodes) {
+          if (otherFact.props.subject === subject && 
+              otherFact.props.predicate === predicate &&
+              otherFact.props.object !== object) {
+            // Different object for same subject+predicate
+            if (claimLower.includes(otherFact.props.object)) {
+              // Claim mentions this other object - it's a contradiction
+              return matchedFact; // Return the correct fact
+            }
+          }
+        }
+        // Claim mentions subject+predicate but wrong object
+        return matchedFact;
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Cosine similarity between two vectors.
+   * @private
+   */
+  _cosineSimilarity(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    return denom > 0 ? dot / denom : 0;
+  }
+
+  /**
+   * Get stats about stored facts.
+   * @returns {Promise<Object>}
+   */
+  async getFactStats() {
+    const allNodes = await this._getAllNodes();
+    const facts = allNodes.filter(n => n.kind === 'fact');
+    
+    const byStatus = { verified: 0, refuted: 0, unverified: 0 };
+    for (const f of facts) {
+      const status = f.props?.status || 'unverified';
+      byStatus[status] = (byStatus[status] || 0) + 1;
+    }
+    
+    return {
+      total: facts.length,
+      byStatus
+    };
+  }
 }
 

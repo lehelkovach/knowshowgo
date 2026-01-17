@@ -275,12 +275,18 @@ const result = engine.run(schema, evidence);
 ### Existing ✅
 `GET /health`, `POST /api/prototypes`, `POST /api/concepts`, `POST /api/concepts/search`, `POST /api/associations`, `POST /api/procedures`, `POST /api/orm/*`
 
-### v0.2.0 (Building Now)
+### v0.2.0 ✅
 ```
 POST /api/assertions           # Create assertion
 GET  /api/assertions           # Query by subject/predicate
 GET  /api/entities/:id/snapshot  # Resolved values
 GET  /api/entities/:id/evidence  # All competing assertions
+
+# Verification / Hallucination Detection
+POST /api/facts                # Store verified fact
+POST /api/facts/bulk           # Store multiple facts
+POST /api/verify               # Check claim against facts
+GET  /api/facts/stats          # Get fact statistics
 ```
 
 ---

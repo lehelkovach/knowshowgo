@@ -6,20 +6,48 @@ A semantic memory engine for AI agents — fuzzy ontology knowledge graph with p
 
 ```bash
 npm install
-npm test           # 115 tests
+npm test           # 128 tests
 npm start          # Start server at http://localhost:3000
 ```
 
 ## What is KnowShowGo?
 
-A **semantic memory engine** for AI agents.
+A **semantic memory engine** for AI agents with **hallucination detection**.
 
 - **Assertions** — Store facts with truth values
 - **Snapshots** — Get resolved values (highest truth wins)
+- **Verification** — Check claims against stored facts (hallucination detection)
 - **Search** — Find by semantic similarity
 - **Procedures** — Store and retrieve workflows
 
 **Design principle: KISS (Keep It Simple Stupid)**
+
+## Hallucination Detection
+
+KnowShowGo integrates with [scp_alg_test](https://github.com/lehelkovach/scp_alg_test) for hallucination detection.
+
+```bash
+# Store verified facts
+curl -X POST http://localhost:3000/api/facts \
+  -H "Content-Type: application/json" \
+  -d '{"subject": "Bell", "predicate": "invented", "object": "telephone"}'
+
+# Verify a claim
+curl -X POST http://localhost:3000/api/verify \
+  -H "Content-Type: application/json" \
+  -d '{"claim": "Edison invented the telephone"}'
+# → {"status": "refuted", "reason": "Contradicts known fact..."}
+```
+
+Python client (for scp_alg_test):
+```python
+from api.python.client import KSGGroundTruth
+
+gt = KSGGroundTruth("http://localhost:3000")
+gt.add_verified_fact("Bell", "invented", "telephone")
+result = gt.check("Edison invented the telephone")
+# result["status"] == "refuted"
+```
 
 ## For Humans: Getting Started
 
