@@ -12,12 +12,14 @@ npm start          # Start server at http://localhost:3000
 
 ## What is KnowShowGo?
 
-KnowShowGo is a **semantic memory engine** where:
-- **Assertions are truth-bearing** — All facts have truth/strength/provenance
-- **Evidence vs Snapshot** — Auditable raw data vs canonical derived view
-- **Claims deduplicate** — Multiple sources merge via embedding similarity
-- **Logic is computable** — NeuroSym engine for fuzzy reasoning
-- **Prototype theory** — Types emerge from exemplar aggregation
+A **semantic memory engine** for AI agents.
+
+- **Assertions** — Store facts with truth values
+- **Snapshots** — Get resolved values (highest truth wins)
+- **Search** — Find by semantic similarity
+- **Procedures** — Store and retrieve workflows
+
+**Design principle: KISS (Keep It Simple Stupid)**
 
 ## For Humans: Getting Started
 
