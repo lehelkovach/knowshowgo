@@ -6,6 +6,48 @@
 
 ---
 
+## 0. IMPORTANT: Existing Work in osl-agent-prototype Branches
+
+**The integration work is already partially complete** in osl-agent-prototype branches:
+
+### Branch: `archived/knowshowgo-service` ✅ READY TO USE
+
+This branch contains **production-ready** integration code:
+
+| File | Description | Status |
+|------|-------------|--------|
+| `services/knowshowgo/service.py` | FastAPI KnowShowGo service | ✅ Complete |
+| `services/knowshowgo/client.py` | Python HTTP client + MockClient | ✅ Complete |
+| `services/knowshowgo/models.py` | Pydantic request/response models | ✅ Complete |
+| `src/personal_assistant/knowshowgo_adapter.py` | Embedded vs Remote adapter | ✅ Complete |
+
+**Key Features Already Implemented:**
+- Health check endpoint
+- Create/get concepts
+- Search with embeddings
+- Upsert nodes/edges
+- Store/match form patterns
+- List prototypes
+- Mock client for testing
+- Auto-fallback from remote to embedded
+
+**To use this existing work:**
+```bash
+cd osl-agent-prototype
+git checkout archived/knowshowgo-service
+# Or cherry-pick the relevant files to main
+```
+
+### Branch: `cursor/knowshowgo-repo-push-c83c`
+
+Contains:
+- `HANDOFF-KNOWSHOWGO-SERVICE.txt` - Detailed guide for creating standalone service
+- `docs/queue-knowshowgo-integration.md` - Queue items as KnowShowGo concepts
+
+**Recommendation:** The `archived/knowshowgo-service` branch has all the Python client/adapter code you need. Merge or cherry-pick that first before building new integrations.
+
+---
+
 ## 1. Current State Analysis
 
 ### osl-agent-prototype Has (Python) ✅
@@ -200,54 +242,68 @@ class KnowShowGoClient:
         await self.client.aclose()
 ```
 
-### Step 2: Create Adapter Layer
+### Step 2: Use Existing Adapter (from `archived/knowshowgo-service` branch)
 
-Replace direct memory calls with client calls:
+**IMPORTANT:** An adapter already exists! Get it from the branch:
+
+```bash
+git show archived/knowshowgo-service:src/personal_assistant/knowshowgo_adapter.py > src/personal_assistant/knowshowgo_adapter.py
+```
+
+The existing `KnowShowGoAdapter` includes:
+- Auto-detection of service vs embedded mode via `KNOWSHOWGO_URL` env var
+- Fallback from remote to embedded if service unavailable
+- Mock client support for testing
+- Unified interface for `create_concept`, `search`, `upsert`, etc.
+
+**Key usage pattern:**
 
 ```python
-# src/personal_assistant/knowshowgo_adapter.py
+from src.personal_assistant.knowshowgo_adapter import KnowShowGoAdapter
 
-from src.personal_assistant.knowshowgo_client import KnowShowGoClient
+# Auto-selects backend based on KNOWSHOWGO_URL env var
+adapter = KnowShowGoAdapter.create(memory=memory, embed_fn=embed_fn)
+
+# Works the same whether embedded or remote
+uuid = adapter.create_concept(prototype_uuid, json_obj)
+results = adapter.search(query, top_k=10)
+```
+
+If you need a hybrid adapter with local WorkingMemory, extend the existing one:
+
+```python
+# src/personal_assistant/knowshowgo_hybrid_adapter.py
+
+from src.personal_assistant.knowshowgo_adapter import KnowShowGoAdapter
 from src.personal_assistant.working_memory import WorkingMemoryGraph
 from src.personal_assistant.async_replicator import AsyncReplicator
 
-class KnowShowGoAdapter:
+class KnowShowGoHybridAdapter(KnowShowGoAdapter):
     """
-    Adapter that combines:
-    - Remote KnowShowGo service (semantic memory)
+    Extends KnowShowGoAdapter with:
     - Local WorkingMemory (session activation)
     - AsyncReplicator (background sync)
     """
     
-    def __init__(
-        self,
-        ksg_url: str = "http://localhost:3000",
-        working_memory: WorkingMemoryGraph = None,
-        replicator: AsyncReplicator = None
-    ):
-        self.client = KnowShowGoClient(ksg_url)
+    def __init__(self, working_memory=None, replicator=None, **kwargs):
+        super().__init__(**kwargs)
         self.wm = working_memory or WorkingMemoryGraph()
         self.replicator = replicator
     
-    async def create_concept(self, prototype_uuid: str, data: dict) -> str:
-        """Create concept in remote KnowShowGo."""
-        uuid = await self.client.create_concept(prototype_uuid, data)
-        return uuid
-    
-    async def search_with_activation(
+    def search_with_activation(
         self,
         query: str,
         top_k: int = 10,
         activation_boost: float = 0.1
     ) -> list:
         """Search with working memory activation boost."""
-        results = await self.client.search_concepts(query, top_k * 2)
+        results = self.search(query, top_k=top_k * 2)
         
         # Apply activation boost from working memory
         boosted = []
         for r in results:
             uuid = r.get("uuid")
-            boost = self.wm.get_activation_boost(uuid, default=0.0)
+            boost = self.wm.get_activation(uuid) if hasattr(self.wm, 'get_activation') else 0.0
             score = r.get("score", 0.5) + (boost * activation_boost)
             boosted.append({**r, "score": score, "activation_boost": boost})
         
@@ -261,15 +317,12 @@ class KnowShowGoAdapter:
         
         # Optionally sync to remote via replicator
         if self.replicator:
-            self.replicator.enqueue(EdgeUpdate(
-                source=source_uuid,
-                target=target_uuid,
-                delta=1.0,
-                max_weight=100.0
-            ))
-    
-    async def close(self):
-        await self.client.close()
+            self.replicator.enqueue({
+                "source": source_uuid,
+                "target": target_uuid,
+                "delta": 1.0,
+                "max_weight": 100.0
+            })
 ```
 
 ### Step 3: Update Agent to Use Adapter
@@ -412,25 +465,25 @@ Before full migration, ensure knowshowgo-js implements:
 
 ## 8. Migration Timeline
 
-### Phase 1: Coexistence (Now)
-- Both repos work independently
-- osl-agent-prototype uses local KnowShowGoAPI
-- knowshowgo-js provides REST API
+### Phase 1: Use Existing Work (NOW - Start Here)
+- **Merge `archived/knowshowgo-service` branch** to main in osl-agent-prototype
+- This gives you: FastAPI service, Python client, adapter layer
+- Test with `USE_KNOWSHOWGO_SERVICE=false` (embedded mode)
 
-### Phase 2: Client Integration
-- Add KnowShowGoClient to osl-agent-prototype
-- Create adapter layer
-- Test with both local and remote
+### Phase 2: Deploy knowshowgo-js Service
+- Run knowshowgo-js via Docker or standalone
+- Set `KNOWSHOWGO_URL=http://localhost:3000` in osl-agent-prototype
+- Adapter auto-switches to remote mode
 
-### Phase 3: Remote Primary
-- Switch semantic memory to remote knowshowgo
-- Keep WorkingMemory local
-- Sync via AsyncReplicator
+### Phase 3: Hybrid Mode with WorkingMemory
+- Extend adapter with `KnowShowGoHybridAdapter` (see Step 2)
+- Keep WorkingMemory local for session state
+- Sync deltas via AsyncReplicator
 
 ### Phase 4: Full Integration
-- knowshowgo implements Assertions, WTA
+- knowshowgo-js implements Assertions, WTA, NeuroDAG
 - osl-agent uses snapshot/evidence APIs
-- Shared truth across agents
+- Shared truth across multiple agents
 
 ---
 
